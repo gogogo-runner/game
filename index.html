@@ -1,0 +1,2503 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>僵尸想上学</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='7' fill='%2357b84b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23ffd23f'/%3E%3C/svg%3E">
+<style>
+/* ================= 页面基础样式（无外部资源，纯系统字体） ================= */
+html, body {
+  margin: 0; padding: 0;
+  background: #1b1e24;
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  overscroll-behavior: none;
+}
+#wrap { text-align: center; padding: 12px; }
+h1 {
+  color: #e8e8e8; font-size: 20px; font-weight: 600;
+  margin: 0 0 10px 0; letter-spacing: 1px;
+}
+/* 画布：等比缩放适配手机 / 桌面，点击热区保持可点 */
+canvas {
+  display: block; margin: 0 auto;
+  width: 100%; max-width: 720px; height: auto;
+  background: #23262c;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  cursor: pointer;
+}
+.hint { color: #7f8794; font-size: 12px; margin: 10px 0 0 0; line-height: 1.7; }
+.credit { color: #aeb6c0; font-size: 13px; margin: 10px 0 0 0; letter-spacing: 3px; }
+@media (max-width: 560px) {
+  h1 { font-size: 17px; margin-bottom: 6px; }
+  #wrap { padding: 6px; }
+  .hint { font-size: 11px; line-height: 1.6; }
+  .credit { font-size: 12px; }
+}
+@media (max-height: 800px) and (min-width: 600px) {
+  /* 笔记本屏幕高度不够时压缩页头，保证画布完整可见 */
+  .credit { display: none; }
+  h1 { font-size: 17px; margin-bottom: 6px; }
+  .hint { font-size: 11px; line-height: 1.4; margin-top: 6px; }
+}
+@media (max-height: 740px) and (min-width: 600px) {
+  .hint { display: none; }
+}
+@media (max-height: 700px) and (min-width: 600px) {
+  /* 横屏手机高度不够时隐藏页面标题/说明，把高度全部让给画布 */
+  h1, .hint, .credit { display: none; }
+  #wrap { padding: 2px; }
+  canvas { max-height: calc(100vh - 8px); width: auto; max-width: 100%; }
+}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>僵尸想上学</h1>
+  <canvas id="game" width="720" height="670" role="img" aria-label="僵尸想上学：5 行 9 列草坪的植物大战僵尸游戏画面，点击种植植物、收集阳光，守住小屁孩的课本"></canvas>
+  <p class="hint">选模式 → 挑最多 10 种植物出战 ｜ 点卡片选植物或铲子，点草坪种植 / 铲除<br>空格暂停（可开关自动收阳光 / 音效）· 1 / 2 切速度 · R 重开本局 ｜ 保护我方小屁孩课本！</p>
+  <p class="credit">七巧出品必出精品</p>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+ * 僵尸想上学（单文件实现，无外部资源、无音频文件、无需后端）
+ *
+ * 故事：僵尸偷不到脑子太丢脸，决定读书长脑子，于是去"借"农夫小孩的课本……
+ * 模式：关卡模式（14 关逐关解锁，难度一关比一关硬）/ 无尽模式（选难度 → 选 10 植物 → 战斗）
+ * 玩法：5 行 × 9 列草坪。僵尸从右侧（第 9 列外）生成、向左走；
+ *       点击底部植物卡片选中 → 点击草坪空格种植；点击阳光 +25；
+ *       任意僵尸走到最左侧 = 课本被偷 = 失败；暂停菜单 / 结算界面可重开本局。
+ * 操作：空格暂停 / 1、2 切 1x、2x / R 重开 / Esc 取消选中；
+ *       暂停菜单里可开关「自动收阳光」和「音效」（音效为 WebAudio 实时合成，无音频文件）
+ *
+ * 核心机制（贴近原版）：
+ *   - 向日葵：每 15s 产一个阳光
+ *   - 豌豆射手：同行有僵尸时每 1.4s 一发豌豆（20 伤害）；双发射手一轮连发两颗
+ *   - 坚果墙 4000 血；高坚果 8000 血且更高，撑杆跳翻不过去
+ *   - 土豆地雷：17.5s 预热，就绪后本行僵尸进入一格即引爆；非巨人必杀，未就绪被啃直接消失
+ *   - 食人花：吞掉正前方一格内的僵尸（巨人除外），咀嚼 CD 42s，咀嚼期间可被啃
+ *   - 西瓜投手：每 2.9s 投西瓜，80 直伤 + 40 范围溅射；寒冰西瓜附带减速与冰道
+ *   - 寒冰射手：20 伤害 + 减速 10s + 落点冰道；烈焰豌豆：40 直伤 + 溅射 13 + 3s 灼烧
+ *   - 倭瓜：前后 1.5 格内最近僵尸跳砸（一次性）；火爆辣椒：1s 引信烧穿整行；
+ *     樱桃炸弹：1s 引信炸开九宫格；三种对非巨人必杀，对巨人固定 1800
+ *   - 僵尸：普通 200 / 路障 320（护甲 120 + 本体 200）/
+ *           铁桶 1370（护甲 1170 + 本体 200）/ 撑杆 340（快，跳第一个
+ *           非坚果/非高坚果植物——土豆地雷也会被跳过、不会被引爆——
+ *           后变普通僵尸；不能跳坚果墙和高坚果）
+ *   - 僵尸啃食植物：每秒 100 伤害；植物血量归零消失
+ *   - 波次：进度制推进，第 6 波起每 4 波一次旗帜大波（红字提示后 6s 批量刷出）
+ *   - 无尽模式：血量与移速随存活时间缓慢上涨，打得越久越硬
+ * ===================================================================== */
+
+/* ============================ 0. 常量与工具 ============================ */
+const CELL_W = 80, CELL_H = 100;        // 单格像素宽高
+const ROWS = 5, COLS = 9;               // 5 行 9 列草坪
+const HUD_H = 60, BAR_H = 110;          // 顶部信息条 / 底部选卡栏高度
+const GRID_TOP = HUD_H;                 // 草坪区顶部 y
+const W = CELL_W * COLS;                // 画布宽 720
+const H = GRID_TOP + CELL_H * ROWS + BAR_H; // 画布高 670
+const TAU = Math.PI * 2;
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
+const rand  = (a, b) => a + Math.random() * (b - a);
+const randInt = (a, b) => Math.floor(rand(a, b + 1));
+const dist  = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
+const inRect = (p, r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
+// 点击热区外扩（小按钮在手机上也能点准）
+const inRectPad = (p, r, pad) => p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
+// 格子中心坐标
+const cellCenter = (col, row) => ({ x: col * CELL_W + CELL_W / 2, y: GRID_TOP + row * CELL_H + CELL_H / 2 });
+// 圆角矩形路径
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+// 尊重系统「减少动态效果」设置：只关闭装饰性闪烁，游戏必需的运动保留
+const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ============ 在线自动更新：部署到 http(s) 后，朋友打开同一网址即可拿到最新版 ============ */
+const IS_HOSTED = location.protocol === 'http:' || location.protocol === 'https:';
+let updateAvailable = false;   // 发现新版本
+let refreshing = false;        // 防止重复跳转
+let lastUpdateCheck = 0;
+function hashText(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+// 画面/样式/脚本的指纹：任何一处更新都会变（不依赖手动改版本号）
+function pageSignature(doc) {
+  const style = doc.querySelector('style');
+  const scripts = doc.querySelectorAll('script:not([src])');
+  const script = scripts.length ? scripts[scripts.length - 1] : null;
+  const body = doc.body ? doc.body.cloneNode(true) : null;
+  if (body) body.querySelectorAll('script, canvas').forEach(n => n.remove());
+  return hashText((style ? style.textContent : '') + '\u0001' + (script ? script.textContent : '') + '\u0001' + (body ? body.innerHTML : ''));
+}
+let BUILD_SIG = '';
+// 等页面完全解析/加载后再取指纹：脚本执行中读取自身 body 可能还拿不到完整的脚本节点
+function initBuildSignature() { BUILD_SIG = pageSignature(document); }
+if (document.readyState === 'complete') initBuildSignature();
+else window.addEventListener('load', initBuildSignature, { once: true });
+function refreshToLatest() {
+  if (refreshing) return;
+  refreshing = true;
+  setTimeout(() => { refreshing = false; }, 3000);   // 万一跳转被拦截，3 秒后允许重试
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('_v', Date.now().toString(36));
+    location.replace(u.toString());
+  } catch (e) { location.reload(); }
+}
+async function checkForUpdate(force) {
+  if (!IS_HOSTED || refreshing || updateAvailable || !BUILD_SIG) return;
+  const now = Date.now();
+  if (!force && now - lastUpdateCheck < 60000) return;
+  lastUpdateCheck = now;
+  try {
+    const u = new URL(location.href);
+    u.searchParams.set('_check', now.toString(36));
+    const res = await fetch(u.toString(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    if (!doc.getElementById('game') || !doc.querySelector('script:not([src])')) return;  // 不是游戏页
+    if (pageSignature(doc) === BUILD_SIG) return;
+    updateAvailable = true;
+    if (!game.started && game.screen === 'home') refreshToLatest();
+    else showToast('发现新版本，回首页后自动更新');
+  } catch (e) { /* 离线 / 跨域 / 网络失败：静默重试 */ }
+}
+
+/* 难度配置（无尽模式）：三档递增压力（刷怪更快更多、僵尸更快、血量倍率更高、高级僵尸解锁更早） */
+const DIFFICULTIES = {
+  easy:   { name: '简单', first: 14, spawnBase: 9.0, spawnRate: 0.030, spawnMin: 2.8, normalSpeed: 14, poleSpeed: 30, skyMin: 5,  skyMax: 8,  skyDouble: 0.30, hpMul: 1.0,  unlockMul: 1.5 },
+  medium: { name: '中等', first: 11, spawnBase: 7.5, spawnRate: 0.035, spawnMin: 2.3, normalSpeed: 18, poleSpeed: 38, skyMin: 6,  skyMax: 9,  skyDouble: 0.25, hpMul: 1.15, unlockMul: 1.0 },
+  hard:   { name: '困难', first: 9,  spawnBase: 6.0, spawnRate: 0.040, spawnMin: 1.8, normalSpeed: 22, poleSpeed: 46, skyMin: 7,  skyMax: 10, skyDouble: 0.20, hpMul: 1.35, unlockMul: 0.7 }
+};
+/* 关卡模式：共 14 关，逐关解锁；第 n 关目标波数 = n+1（打满后清场即通关） */
+const LEVEL_COUNT = 14;
+const FAIL_VIDEO_TIME = 4;   // 失败结局短片总时长（秒）：前 3s 静止，最后 1s 渐隐至黑屏
+
+/* 关卡难度梯度：第 1 关宽松热身，第 14 关接近困难（返回独立配置对象，不污染 DIFFICULTIES） */
+function levelDiff(lv) {
+  const t = (lv - 1) / Math.max(1, LEVEL_COUNT - 1);
+  const L = (a, b) => a + (b - a) * t;
+  return {
+    name: '第 ' + lv + ' 关', level: true,
+    first: L(14, 12),  spawnBase: L(9.0, 5.5), spawnRate: L(0.025, 0.045), spawnMin: L(3.0, 1.7),
+    normalSpeed: L(12, 21), poleSpeed: L(26, 44),
+    skyMin: L(6, 7.5), skyMax: L(9, 10.5), skyDouble: L(0.34, 0.20),
+    hpMul: L(0.8, 1.35), unlockMul: L(1.7, 0.75)
+  };
+}
+/* 无尽模式时间压力：血量 7 分钟 +90% 封顶，移速 10 分钟 +25% 封顶（定格在出生那一刻） */
+function endlessRampHp() { return game.mode === 'endless' ? 1 + Math.min(0.9, game.time / 420 * 0.9) : 1; }
+function endlessRampSpeed() { return game.mode === 'endless' ? 1 + Math.min(0.25, game.time / 600 * 0.25) : 1; }
+
+/* ============================ 1. 全局游戏状态 ============================ */
+const game = {
+  time: 0,            // 累计游戏时间（秒）
+  sun: 50,            // 阳光数量（初始 50）
+  selected: null,     // 当前选中的植物类型名（null = 未选中）
+  over: false,        // 是否失败（课本被偷）
+  started: false,     // 是否已在战斗中
+  screen: 'home',     // 非战斗界面：home 首页 / intro 简介 / mode 模式选择 / level 关卡选择 / diff 无尽难度 / pick 选卡 / result 结算
+  mode: null,         // 当前模式：'endless' 无尽 / 'level' 关卡
+  level: 1,           // 关卡模式当前关卡（1~14）
+  levelTarget: 2,     // 关卡目标波数（第 n 关需打满 n+1 波）
+  failVideo: null,    // 失败结局短片 { t }：黑底红字 4 秒（前 3s 静止，最后 1s 渐隐）
+  overDelay: 0,       // 失败瞬间的定格时长：先让玩家看清"课本被偷"，再播短片
+  newRecord: false,   // 本局是否刷新历史纪录
+  result: null,       // 结算数据 { win, wave, time, kills }
+  diff: DIFFICULTIES.easy, // 当前难度配置
+  plants: [],         // 场上所有植物
+  zombies: [],        // 场上所有僵尸
+  projectiles: [],    // 子弹（豌豆 / 西瓜）
+  suns: [],           // 场上阳光
+  particles: [],      // 简单特效（爆炸 / 溅射 / 吞噬等）
+  spawnTimer: 16,     // 距下次刷僵尸的倒计时（开局留缓冲）
+  skySunTimer: 5,     // 距下次天上掉阳光的倒计时
+  cd: {},             // 每种植物的独立种植冷却：key=植物类型，value=剩余秒数
+  toast: null,        // 提示气泡 { text, ttl }
+  stats: { kills: 0 },// 击杀统计（结算时显示）
+  wave: 1,            // 当前波次
+  waveTotal: 0,       // 本波僵尸总数（需全部击杀才算清波）
+  waveLeft: 0,        // 本波还未刷出的数量
+  waveKilled: 0,      // 本波已击杀数（击杀越快，下一波/大波来得越早）
+  waveTimer: 0,       // 本波进行时长（超过 WAVE_TIMEOUT 强制进入下一波）
+  waveGap: 0,         // 波间喘息倒计时
+  bigPending: false,  // 旗帜大波：是否已出红字提示、正在等待批量刷出
+  bigTimer: 0,        // 大波批量刷出倒计时（提示后 7.2s）
+  bigCount: 0,        // 已出现的大波次数（决定本次大波僵尸数量，逐次递增）
+  lastGargWarn: -99,  // 上一次"巨人僵尸出现"提示的时间（节流）
+  warn: null,         // 红字警告 { text, ttl, sub? }
+  pickedPlants: [],   // 本局选定的出战植物（最多 10 种，中途不可更换）
+  iceTracks: [],      // 冰道 { row, col, ttl }：寒冰命中落点留下，持续减速经过的僵尸
+  carts: [true, true, true, true, true], // 每行最左一台小推车（触发后永久消失）
+  cartsMoving: [],    // 正在冲刺的小推车 { row, x }
+  paused: false,      // 是否暂停
+  speed: 1,           // 游戏速度倍率（1 / 2）
+  sound: true,        // 音效开关
+  autoSun: false,     // 自动收集阳光
+  best: { wave: 1, kills: 0 } // 历史最佳（localStorage 持久化）
+};
+
+/* ============================ 1.5 音效（WebAudio 实时合成） ============================ */
+const Sfx = {
+  ac: null, master: null, last: {},
+  // 首次用户手势时创建 AudioContext（浏览器要求），之后直接在现有上下文上播放
+  init() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!this.ac) {
+      try {
+        this.ac = new AC();
+        this.master = this.ac.createGain();
+        this.master.gain.value = 0.26;
+        this.master.connect(this.ac.destination);
+      } catch (e) { this.ac = null; return; }
+    }
+    if (this.ac.state === 'suspended' && this.ac.resume) this.ac.resume();
+  },
+  // 节流：同一种音效在 throttle 秒内只响一次，避免连射糊成噪音
+  ok(key, throttle) {
+    if (!game.sound || !this.ac) return false;
+    const t = this.ac.currentTime;
+    if (throttle && (this.last[key] || 0) > t - throttle) return false;
+    this.last[key] = t;
+    return true;
+  },
+  tone(freq, dur, type, vol, slide) {
+    const ac = this.ac, t = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq * slide), t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t + dur + 0.03);
+  },
+  burst(dur, vol, cutoff) {
+    const ac = this.ac, t = ac.currentTime;
+    const n = Math.max(1, Math.floor(ac.sampleRate * dur));
+    const buf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff || 1200;
+    const g = ac.createGain();
+    g.gain.value = vol;
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(this.master);
+    src.start(t);
+  }
+};
+function sfx(name) {
+  const S = Sfx;
+  if (!S.ac || !game.sound) return;
+  switch (name) {
+    case 'shoot': if (S.ok('shoot', 0.09)) S.tone(660, 0.07, 'square', 0.06, 0.55); break;
+    case 'plant': if (S.ok('plant', 0.02)) S.tone(300, 0.12, 'triangle', 0.20, 1.7); break;
+    case 'sun':   if (S.ok('sun', 0.02)) S.tone(880, 0.15, 'sine', 0.20, 1.9); break;
+    case 'eat':   if (S.ok('eat', 0.30)) S.burst(0.09, 0.16, 700); break;
+    case 'hit':   if (S.ok('hit', 0.05)) S.tone(220, 0.05, 'square', 0.05, 0.7); break;
+    case 'die':   if (S.ok('die', 0.07)) S.tone(190, 0.20, 'sawtooth', 0.14, 0.30); break;
+    case 'boom':  if (S.ok('boom', 0.05)) { S.burst(0.42, 0.42, 900); S.tone(110, 0.34, 'sawtooth', 0.24, 0.40); } break;
+    case 'wave':  if (S.ok('wave', 0.60)) S.tone(170, 0.70, 'sawtooth', 0.24, 1.6); break;
+    case 'ui':    if (S.ok('ui', 0.02)) S.tone(520, 0.06, 'sine', 0.14, 1.2); break;
+    case 'win':   S.tone(520, 0.22, 'triangle', 0.26, 1.35); break;
+    case 'lose':  S.tone(300, 1.00, 'triangle', 0.26, 0.22); break;
+  }
+}
+
+/* ============================ 2. 植物定义与创建 ============================ */
+// cd：该植物种植后的独立冷却（秒），原版同系列植物共用一套节奏；desc：选卡界面说明
+const PLANT_TYPES = {
+  sunflower:   { name: '向日葵',   cost: 50,  hp: 300,  cd: 5,   color: '#ffce3a', dark: '#e0a817', desc: '每 15 秒产一个阳光，开局越早种越赚' },
+  peashooter:  { name: '豌豆射手', cost: 100, hp: 300,  cd: 5,   color: '#57b84b', dark: '#3f8f36', desc: '同行有僵尸时每 1.4 秒射一发豌豆（20 伤害）' },
+  repeater:    { name: '双发射手', cost: 200, hp: 300,  cd: 5,   color: '#4aa83f', dark: '#357f31', desc: '一轮连发两颗豌豆，输出直接翻倍（40 伤害）' },
+  wallnut:     { name: '坚果墙',   cost: 50,  hp: 4000, cd: 5,   color: '#c9955f', dark: '#a9713f', desc: '4000 血肉盾，撑杆跳僵尸跳不过去' },
+  tallnut:     { name: '高坚果',   cost: 150, hp: 8000, cd: 5,   color: '#d8a161', dark: '#b07b45', desc: '8000 血的厚墙，撑杆跳翻不过去' },
+  potatomine:  { name: '土豆地雷', cost: 25,  hp: 100,  cd: 5,   color: '#b07b45', dark: '#8a5a2e', desc: '17.5 秒预热，就绪后踩到就炸；非巨人僵尸必杀' },
+  chomper:     { name: '食人花',   cost: 150, hp: 300,  cd: 5,   color: '#e6484d', dark: '#b22a30', desc: '一口吞掉贴脸僵尸（巨人除外），之后要嚼 42 秒' },
+  melonpult:   { name: '西瓜投手', cost: 300, hp: 300,  cd: 5,   color: '#3aa8a0', dark: '#2b8079', desc: '每 2.9 秒投瓜：80 直伤 + 40 溅射' },
+  snowpea:     { name: '寒冰射手', cost: 175, hp: 300,  cd: 35,  color: '#6cc4e8', dark: '#3f93c4', desc: '豌豆附带减速，落点还会留下冰道' },
+  wintermelon: { name: '寒冰西瓜', cost: 400, hp: 300,  cd: 5,   color: '#5bb8e0', dark: '#2e86b8', desc: '范围溅射 + 减速，后期控场之王' },
+  squash:      { name: '倭瓜',     cost: 50,  hp: 300,  cd: 30,  color: '#4fae4a', dark: '#357f31', desc: '前后 1.5 格内都能跳砸；非巨人僵尸必杀' },
+  jalapeno:    { name: '火爆辣椒', cost: 125, hp: 300,  cd: 50,  color: '#e8362b', dark: '#b01f16', desc: '1 秒引信烧穿整行；非巨人僵尸必杀并清掉冰道' },
+  firepea:     { name: '烈焰豌豆', cost: 200, hp: 300,  cd: 35,  color: '#f07c2e', dark: '#c05a18', desc: '40 直伤 + 13 溅射，命中附带 3 秒灼烧' },
+  cherrybomb:  { name: '樱桃炸弹', cost: 150, hp: 300,  cd: 50,  color: '#e23b3b', dark: '#a81f1f', desc: '1 秒引信后炸开九宫格；非巨人僵尸必杀' }
+};
+const PLANT_ORDER = ['sunflower', 'peashooter', 'repeater', 'wallnut', 'tallnut', 'potatomine', 'chomper',
+                     'melonpult', 'snowpea', 'wintermelon', 'squash', 'jalapeno', 'firepea', 'cherrybomb'];
+
+/* 各机制数值（与原版贴近） */
+const SUN_VALUE = 25;             // 收集一个阳光 +25
+const SUN_TX = 40, SUN_TY = 30;   // 阳光收集动作：飞向的顶部计数器位置
+const PLANT_COOLDOWN = 5;         // 未单独标注的植物默认冷却（秒）
+const SUNFLOWER_INTERVAL = 15;    // 向日葵产阳光周期（秒）
+const PEA_DAMAGE = 20, PEA_INTERVAL = 1.4, PEA_SPEED = 340;   // 豌豆 / 冰豌豆
+const REPEATER_GAP = 0.13;        // 双发射手第二发的间隔（秒）
+const FIRE_PEA_DAMAGE = 40, FIRE_PEA_SPLASH = 13, FIRE_PEA_RADIUS = 80; // 烈焰豌豆：直伤 40 + 小范围溅射 13
+const FIRE_BURN_DPS = 10, FIRE_BURN_TIME = 3;  // 烈焰豌豆灼烧：每秒 10 点真实伤害（直扣本体、无视护甲），命中刷新持续 3 秒
+const MELON_DAMAGE = 80, MELON_SPLASH = 40, MELON_INTERVAL = 2.9,
+      MELON_SPEED = 380, MELON_RADIUS = CELL_W * 1.15;        // 西瓜弹速与溅射范围
+const ICE_SLOW_TIME = 10;         // 寒冰减速持续（秒）
+const ICE_TRACK_TTL = 8;          // 冰道持续（秒）
+// 下面四种"一次性植物"对非巨人僵尸直接必杀（避免僵尸血量随难度/无尽时间放大后，
+// 1800 连铁桶都炸不死）；对巨人僵尸只造成固定的 1800 伤害。
+const SQUASH_DAMAGE = 1800;       // 倭瓜对巨人的伤害
+const JALAPENO_DAMAGE = 1800, JALAPENO_FUSE = 1;  // 火爆辣椒对巨人的伤害与 1 秒引信
+const CHERRY_DAMAGE = 1800, CHERRY_FUSE = 1.1, CHERRY_RADIUS = CELL_W * 1.45; // 樱桃炸弹：九宫格，对巨人 1800
+const MINE_ARM_TIME = 17.5, MINE_DAMAGE = 1800;               // 地雷预热 / 对巨人伤害
+const CHOMER_CHEW = 42;                                       // 食人花咀嚼 CD（秒）
+const ZOMBIE_BITE = 100;                                      // 僵尸啃植物每秒伤害
+const CART_X = 12, CART_SPEED = 700;                          // 小推车：停在每行最左(房屋前)，触发后以 700px/s 向右冲刺
+
+/* 波次与旗帜大波（原版规则）：进度制推进，每 4 波一次大波，红字提示后延迟 7.2s 批量刷僵尸 */
+const WAVE_TIMEOUT = 90;      // 本波最大持续时间（秒），超时强制进入下一波
+const BIG_WAVE_FIRST = 6;     // 第 6 波起出现旗帜大波（关卡第 5 关以后就会碰上）
+const BIG_WAVE_EVERY = 4;     // 之后每 4 波一次旗帜大波（6、10、14…）
+const BIG_WAVE_DELAY = 6;     // 红字提示 → 延迟 6 秒 → 批量刷僵尸
+const BIG_WAVE_BASE = 10;     // 第一次大波的僵尸数量
+const BIG_WAVE_STEP = 2;      // 之后每次大波比上一次多 2 只
+const WAVE_GAP = 2.2;         // 一波结束到下一波开始的喘息时间（秒）
+
+// 创建植物并扣阳光；p.timer 按类型承载不同用途（产阳光 / 发射 / 地雷预热）
+function createPlant(type, row, col) {
+  const t = PLANT_TYPES[type], c = cellCenter(col, row);
+  if (game.sun < t.cost) return null;   // 兜底：任何入口都不能把阳光扣成负数
+  const p = {
+    type, row, col,
+    x: c.x, y: c.y,
+    hp: t.hp, maxHp: t.hp,
+    timer: 0,
+    second: 0,          // 双发射手：第二发的延迟
+    armed: false,       // 土豆地雷：是否已就绪
+    chewing: false,     // 食人花：是否在咀嚼
+    chewTimer: 0,       // 食人花咀嚼剩余时间
+    fuse: 0,            // 火爆辣椒 / 樱桃炸弹：引信倒计时
+    flash: 0            // 受击白闪剩余秒数
+  };
+  if (type === 'potatomine') p.timer = MINE_ARM_TIME;
+  if (type === 'sunflower')  p.timer = SUNFLOWER_INTERVAL;
+  if (type === 'jalapeno')   p.fuse = JALAPENO_FUSE;
+  if (type === 'cherrybomb') p.fuse = CHERRY_FUSE;
+  game.plants.push(p);
+  game.sun -= t.cost;
+  sfx('plant');
+  return p;
+}
+// 查询某格植物
+const plantAt = (row, col) => game.plants.find(p => p.row === row && p.col === col);
+/* ============================ 3. 僵尸定义与创建 ============================ */
+// speedMul：相对普通僵尸的速度倍数（撑杆走独立 poleSpeed 配置）
+const ZOMBIE_TYPES = {
+  normal:     { name: '普通僵尸',   bodyHp: 200,  helmetHp: 0,    speedMul: 1,    pole: false, color: '#9aa97b' },
+  cone:       { name: '路障僵尸',   bodyHp: 200,  helmetHp: 120,  speedMul: 1,    pole: false, color: '#9aa97b' },
+  bucket:     { name: '铁桶僵尸',   bodyHp: 200,  helmetHp: 1170, speedMul: 1,    pole: false, color: '#9aa97b' },
+  pole:       { name: '撑杆跳僵尸', bodyHp: 340,  helmetHp: 0,    speedMul: 1,    pole: true,  color: '#8f9e6b' },
+  flag:       { name: '旗帜僵尸',   bodyHp: 200,  helmetHp: 0,    speedMul: 1,    pole: false, color: '#9aa97b' }, // 红旗僵尸：血量与普通相同，只在旗帜大波带头
+  newspaper:  { name: '读报僵尸',   bodyHp: 200,  helmetHp: 0,    paperHp: 170,   speedMul: 0.55, pole: false, color: '#a8b08a' }, // 报纸没碎走得慢，碎了狂暴
+  screendoor: { name: '铁门僵尸',   bodyHp: 200,  helmetHp: 0,    doorHp: 1025,   speedMul: 1,    pole: false, color: '#9aa97b' }, // 铁门挡子弹，爆炸无视
+  football:   { name: '橄榄球僵尸', bodyHp: 200,  helmetHp: 1350, speedMul: 1.8,  pole: false, color: '#8b97a8' }, // 高护甲 + 移动更快
+  gargantuar: { name: '巨人僵尸',   bodyHp: 3000, helmetHp: 0,    speedMul: 0.45, pole: false, color: '#7d6b58', garg: true }, // 高血慢速、砸扁植物、半血抛小鬼
+  imp:        { name: '小鬼僵尸',   bodyHp: 200,  helmetHp: 0,    speedMul: 2.2,  pole: false, color: '#c9b27a' } // 巨人抛出的小鬼：血少跑得快
+};
+const NEWSPAPER_RAGE = 2.6;   // 读报僵尸报纸碎裂后的狂暴速度倍数
+// 创建僵尸：x 从画布右侧外进入；总血量 = 门/纸/护甲 + 本体，并按难度血量倍率 × 无尽时间倍率缩放
+function createZombie(type, row) {
+  const t = ZOMBIE_TYPES[type];
+  // 护甲 / 门 / 报纸和本体一起吃血量倍率，避免低难度下"护甲比总血量还厚"的不一致
+  const mul = game.diff.hpMul * endlessRampHp();
+  const bodyHp = Math.round(t.bodyHp * mul);
+  const helmetHp = Math.round(t.helmetHp * mul);
+  const doorHp = Math.round((t.doorHp || 0) * mul);
+  const paperHp = Math.round((t.paperHp || 0) * mul);
+  const hp = bodyHp + helmetHp + doorHp + paperHp;
+  const spdMul = endlessRampSpeed();
+  const z = {
+    type, row,
+    x: W + 40,
+    y: GRID_TOP + row * CELL_H + CELL_H / 2,
+    hp, maxHp: hp,
+    bodyHp, helmetHp, doorHp, paperHp,
+    spdMul,               // 出生时定格的无尽加速倍率（撑杆跳后 / 狂暴时复用）
+    speed: (t.pole ? game.diff.poleSpeed : t.speedMul * game.diff.normalSpeed) * spdMul,
+    poleActive: t.pole,   // 撑杆是否还在（跳过植物后失效）
+    garg: !!t.garg,       // 巨人僵尸
+    impThrown: false,     // 巨人是否已抛小鬼
+    smashTimer: 0,        // 巨人砸扁植物后的停顿
+    enraged: false,       // 读报僵尸是否已狂暴
+    slowTimer: 0,         // 寒冰减速剩余秒数（期间移速减半）
+    burnTimer: 0,         // 烈焰灼烧剩余秒数
+    burnAcc: 0,           // 灼烧跳伤害累计器（每满 1s 扣 10 血）
+    eating: false,        // 是否在啃植物（驱动啃咬动画）
+    bitePhase: 0,
+    flash: 0,
+    name: t.name, color: t.color
+  };
+  game.zombies.push(z);
+  if (type === 'gargantuar' && game.time - (game.lastGargWarn || -99) > 15) {
+    game.lastGargWarn = game.time;
+    showToast('巨人僵尸出现了！');
+    sfx('boom');
+  }
+  return z;
+}
+// 僵尸受伤：铁门 / 报纸 / 护甲依次扛伤害，打穿后剩余伤害溢出到本体；爆炸伤害无视铁门
+function damageZombie(z, dmg, opts) {
+  const explosive = !!(opts && opts.explosive);
+  if (z.doorHp > 0 && !explosive) { // 铁门：抵挡子弹类攻击；爆炸伤害直接打本体
+    const d = Math.min(z.doorHp, dmg);
+    z.doorHp -= d; z.hp -= d; dmg -= d;
+  }
+  if (z.paperHp > 0) { // 报纸：碎了进入狂暴（速度大幅加快）
+    const d = Math.min(z.paperHp, dmg);
+    z.paperHp -= d; z.hp -= d; dmg -= d;
+    if (z.paperHp <= 0 && !z.enraged) {
+      z.enraged = true;
+      z.speed = NEWSPAPER_RAGE * game.diff.normalSpeed * z.spdMul;
+      addParticle(z.x, z.y, 'hit');
+    }
+  }
+  if (z.helmetHp > 0) { // 护甲先扛（路障 / 铁桶 / 橄榄球）
+    const d = Math.min(z.helmetHp, dmg);
+    z.helmetHp -= d;
+    z.hp -= d;
+    dmg -= d;                       // 剩余伤害穿透护甲
+  }
+  if (dmg > 0) z.hp -= dmg;
+  z.flash = 0.12;
+}
+// 一次性植物结算：非巨人僵尸按当前总血量结算（必杀），巨人只吃固定的 1800
+function instantBlast(z, gargDmg, explosive) {
+  damageZombie(z, z.garg ? gargDmg : z.hp, { explosive: !!explosive });
+}
+
+/* ========================== 4. 子弹 / 阳光 / 特效 ========================== */
+// 发射豌豆（直线）：普通 / 冰豌豆（减速）/ 火豌豆（直伤 + 溅射）
+function shootPea(p)     { game.projectiles.push({ kind: 'pea',      row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
+function shootIcePea(p)  { game.projectiles.push({ kind: 'icePea',   row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
+function shootFirePea(p) { game.projectiles.push({ kind: 'firePea',  row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
+// 投掷西瓜（本行抛物线，锁定目标僵尸并逐帧跟踪，必中）；冰瓜 kind='iceMelon'
+function throwMelon(p, tgt, kind) {
+  const sx = p.x + CELL_W * 0.26, sy = p.y - 16;
+  const d = Math.max(60, Math.hypot(tgt.x - sx, tgt.y - sy));
+  // 第一行贴着 HUD，抛物线压低一些，避免西瓜飞到信息条里"消失"
+  const arc = clamp(sy - GRID_TOP - 12, 18, 88);
+  game.projectiles.push({ kind: kind || 'melon', sx, sy, x: sx, y: sy, t: 0, dur: d / MELON_SPEED, tgt, ex: tgt.x, ey: tgt.y, arc });
+}
+function throwIceMelon(p, tgt) { throwMelon(p, tgt, 'iceMelon'); }
+
+// 寒冰系统：命中减速 / 冰道（区域持续减速） / 辣椒清除冰道
+function slowZombie(z) { z.slowTimer = ICE_SLOW_TIME; }
+function addIceTrack(row, col) {
+  const t = game.iceTracks.find(q => q.row === row && q.col === col);
+  if (t) t.ttl = ICE_TRACK_TTL; else game.iceTracks.push({ row, col, ttl: ICE_TRACK_TTL });
+}
+function updateIceTracks(dt) {
+  for (let i = game.iceTracks.length - 1; i >= 0; i--) {
+    game.iceTracks[i].ttl -= dt;
+    if (game.iceTracks[i].ttl <= 0) game.iceTracks.splice(i, 1);
+  }
+}
+// 僵尸实际移速：自身被减速（冰弹命中）或脚下是冰道 → 移速减半
+function zombieSpeed(z) {
+  const col = clamp(Math.floor(z.x / CELL_W), 0, COLS - 1);
+  const onIce = game.iceTracks.some(t => t.row === z.row && t.col === col);
+  return z.speed * ((z.slowTimer > 0 || onIce) ? 0.5 : 1);
+}
+
+// 生成一个阳光：从 (x,y) 下落到 targetY，落地后停留一段时间
+function spawnSun(x, y, targetY) {
+  game.suns.push({ x, y, targetY, vy: targetY > y ? 90 : 0, vx: rand(-10, 10), life: 13, age: 0, state: 'idle' });
+}
+// 简单特效：爆炸 / 溅射 / 吞噬 / 僵尸死亡 / 命中 / 跳跃
+function addParticle(x, y, kind) { game.particles.push({ x, y, kind, age: 0 }); }
+function durationOf(kind) {
+  if (kind === 'explode') return 0.55;
+  if (kind === 'melonSplash') return 0.4;
+  if (kind === 'sunPop') return 0.6;
+  if (kind === 'swallow' || kind === 'zombieDie') return 0.5;
+  return 0.3;
+}
+
+/* ============================ 5. 更新逻辑（主循环体） ============================ */
+function update(dt) {
+  game.time += dt;
+  for (const k in game.cd) if (game.cd[k] > 0) game.cd[k] = Math.max(0, game.cd[k] - dt); // 各植物冷却独立计时
+  updateSpawning(dt);
+  updateSuns(dt);
+  // 植物更新（死亡统一置 hp=0，循环结束后过滤，避免遍历中 splice 错位）
+  for (const p of game.plants) updatePlant(p, dt);
+  game.plants = game.plants.filter(p => p.hp > 0);
+  updateProjectiles(dt);
+  updateZombies(dt);
+  updateCarts(dt);     // 小推车冲刺（含秒杀本行僵尸 / 碾碎植物）
+  updateIceTracks(dt); // 冰道持续时间
+  updateParticles(dt);
+  // 僵尸死亡清理 + 统计
+  for (let i = game.zombies.length - 1; i >= 0; i--) {
+    const z = game.zombies[i];
+    if (z.hp <= 0) {
+      addParticle(z.x, z.y, 'zombieDie');
+      sfx('die');
+      game.stats.kills++;
+      game.waveKilled++;   // 本波击杀进度：杀满则立即进入下一波（大波来得更早）
+      game.zombies.splice(i, 1);
+    }
+  }
+}
+
+// 刷怪：波次制 + 旗帜大波（原版规则）
+// 小波：少量零散僵尸，无红字、无旗帜僵尸；
+// 旗帜大波：本波清空（或超时）→ 红字提示 → 延迟约 7.2s → 5 行同时批量高密度刷出，带头为旗帜僵尸。
+function updateSpawning(dt) {
+  // 天上掉阳光（独立于僵尸波次）
+  game.skySunTimer -= dt;
+  if (game.skySunTimer <= 0) {
+    spawnSun(rand(70, W - 70), -16, rand(GRID_TOP + 50, H - BAR_H - 40));
+    if (Math.random() < game.diff.skyDouble) spawnSun(rand(70, W - 70), -16, rand(GRID_TOP + 50, H - BAR_H - 40)); // 按难度概率一次掉两颗
+    game.skySunTimer = rand(game.diff.skyMin, game.diff.skyMax);
+  }
+  // 大波红字警告计时
+  if (game.warn) { game.warn.ttl -= dt; if (game.warn.ttl <= 0) game.warn = null; }
+  // 旗帜大波：红字提示后的 7.2 秒延迟 → 一次性批量刷出；来临前不再刷普通僵尸
+  if (game.bigPending) {
+    game.bigTimer -= dt;
+    if (game.bigTimer <= 0) { spawnBigWave(); game.bigPending = false; }
+    return;
+  }
+  // 波间喘息：上一波结束后稍作停顿
+  if (game.waveGap > 0) { game.waveGap -= dt; return; }
+  // 小波：按间隔一只只刷出，直到本波刷满
+  if (game.waveLeft > 0) {
+    game.spawnTimer -= dt;
+    if (game.spawnTimer <= 0) {
+      createZombie(pickZombieType(), randInt(0, ROWS - 1));
+      game.waveLeft--;
+      const d = game.diff;
+      game.spawnTimer = Math.max(d.spawnMin, d.spawnBase - game.time * d.spawnRate) * rand(0.85, 1.2);
+    }
+  }
+  // 波次结算：本波僵尸全部击杀 → 立即进入下一波；超过最大时长 → 强制进入下一波
+  game.waveTimer += dt;
+  const waveCleared = game.waveLeft <= 0 && game.waveKilled >= game.waveTotal;
+  if (waveCleared || game.waveTimer >= WAVE_TIMEOUT) startNextWave();
+}
+// 关卡模式每提升一档，每波额外多一点僵尸（第 1 波保持热身，不额外加）
+function levelWaveBonus() {
+  if (game.mode !== 'level') return 0;
+  return Math.min(4, Math.floor((game.level - 1) / 3));
+}
+// 小波僵尸数量：第 1 波 1 只热身，之后稳步增加（后期最多 18 只）
+function smallWaveSize(n) {
+  // 前几波少量加成，越往后越接近完整关卡加成，避免第 2 波突然暴增
+  const bonus = n >= 2 ? Math.min(levelWaveBonus(), Math.floor(n / 2)) : 0;
+  const cap = game.mode === 'level' ? 18 : 14;
+  return clamp(1 + Math.floor(n * 0.75) + bonus, 1, cap);
+}
+// 旗帜大波数量：每次大波比上一次多 2 只（第 1 次 10 只），关卡模式再加关卡加成
+function bigWaveSize() {
+  const cap = game.mode === 'level' ? 30 : 24;
+  return Math.min(BIG_WAVE_BASE + (game.bigCount - 1) * BIG_WAVE_STEP + levelWaveBonus(), cap);
+}
+// 旗帜大波判定：第 6、10、14… 波
+function isBigWave(n) { return n >= BIG_WAVE_FIRST && (n - BIG_WAVE_FIRST) % BIG_WAVE_EVERY === 0; }
+// 进入下一波：第 6 波起每 4 波（6、10、14…）是旗帜大波；关卡模式打满目标波数即通关
+function startNextWave() {
+  // 关卡模式：目标波必须真正清完才通关；不能用 90 秒超时把残血巨人"拖"成胜利
+  if (game.mode === 'level' && game.wave >= game.levelTarget) {
+    if (game.zombies.some(z => z.hp > 0)) { game.waveTimer = 0; return; }
+    winLevel();
+    return;
+  }
+  game.wave++;
+  game.waveTimer = 0;
+  if (isBigWave(game.wave)) {
+    // 旗帜大波：红字提示 + 延迟后批量刷出（本波僵尸尚未上场）
+    game.bigCount++;          // 大波次数 +1（本次数量 = 上次 + 2）
+    game.bigPending = true;
+    game.bigTimer = BIG_WAVE_DELAY;
+    const finalNote = (game.mode === 'level' && game.wave === game.levelTarget) ? '这是最后一波，守住课本！' : '第 ' + game.wave + ' 波来袭，做好准备！';
+    game.warn = { text: '一大波僵尸正在接近！', ttl: 3, sub: finalNote };
+    game.waveTotal = 0; game.waveLeft = 0; game.waveKilled = 0;
+    sfx('wave');
+  } else {
+    // 普通小波：少量零散僵尸
+    const size = smallWaveSize(game.wave);
+    game.waveTotal = size; game.waveLeft = size; game.waveKilled = 0;
+    game.waveGap = WAVE_GAP;      // 波间喘息
+    game.spawnTimer = 0.5;        // 喘息结束后立刻开始刷
+    game.warn = null;             // 清掉上一波的红字警告
+    // 第 14 关最后一波固定追加一只巨人僵尸，给最终关一个真正的 BOSS
+    if (game.mode === 'level' && game.level === LEVEL_COUNT && game.wave === game.levelTarget) {
+      const g = createZombie('gargantuar', 2);
+      g.x = W + 100;
+      game.waveTotal += 1;
+      game.warn = { text: '最后一波：巨人僵尸来抢课本了！', ttl: 3.4, sub: '撑过这一波就通关' };
+      sfx('wave');
+    } else if (game.mode === 'level' && game.wave === game.levelTarget) {
+      game.warn = { text: '最后一波！', ttl: 2.5, sub: '撑过这一波就通关' };
+      sfx('wave');
+    }
+  }
+}
+// 旗帜大波批量刷出：5 行同时刷、数量远多于小波，第 0 行第一只带头的是旗帜僵尸
+function spawnBigWave() {
+  const size = bigWaveSize();
+  game.waveTotal = size; game.waveLeft = 0; game.waveKilled = 0;
+  let per = Math.floor(size / ROWS), rem = size % ROWS;
+  for (let r = 0; r < ROWS; r++) {
+    let n = per + (rem > 0 ? 1 : 0); if (rem > 0) rem--;
+    for (let k = 0; k < n; k++) {
+      if (k === 0 && r === 0) {              // 带头旗帜僵尸：稍微走在僵尸群前面
+        const f = createZombie('flag', r); f.x = W + 90;
+      } else {
+        createZombie(pickZombieType(), r);
+      }
+    }
+  }
+  // 无尽模式第 10 波起的大波混入一只巨人，避免"巨人只存在于图鉴里"
+  if (game.mode === 'endless' && game.wave >= 10) {
+    const g = createZombie('gargantuar', randInt(0, ROWS - 1));
+    g.x = W + 130;
+    game.waveTotal += 1;
+  }
+}
+// 僵尸解锁池：普通/路障/撑杆/铁桶按时间解锁（时间阈值乘难度系数）；
+// 读报/铁门/橄榄球/巨人按波次解锁，保证关卡模式后期和无尽模式都能见到。
+function unlockedZombieTypes() {
+  const t = game.time, m = game.diff.unlockMul, pool = ['normal'];
+  if (t >= 35 * m)  pool.push('cone');
+  if (t >= 70 * m)  pool.push('pole');
+  if (t >= 120 * m) pool.push('bucket');
+  if (game.wave >= 4) pool.push('newspaper');   // 第 4 波：读报僵尸
+  if (game.wave >= 6) pool.push('screendoor');  // 第 6 波：铁门僵尸
+  if (game.wave >= 7) pool.push('football');    // 第 7 波：橄榄球僵尸
+  if (game.wave >= 8) pool.push('gargantuar');  // 第 8 波：巨人僵尸（第 14 关最终波固定出现）
+  return pool;
+}
+// 从解锁池按权重随机抽取（越强的僵尸越稀有）
+function pickZombieType() {
+  const pool = unlockedZombieTypes();
+  const w = { normal: 5, cone: 3, pole: 2, bucket: 1.6, newspaper: 2, screendoor: 1.4, football: 1, gargantuar: 0.4 };
+  let total = 0; for (const k of pool) total += w[k];
+  let x = Math.random() * total;
+  for (const k of pool) { x -= w[k]; if (x <= 0) return k; }
+  return 'normal';
+}
+
+// 阳光：下落 → 落地轻飘 → 点击后进入 fly 状态飞向计数器 → 到账
+// 开了「自动收阳光」时，阳光落地 0.7 秒后自己飞进计数器
+function updateSuns(dt) {
+  for (let i = game.suns.length - 1; i >= 0; i--) {
+    const s = game.suns[i];
+    if (s.state === 'fly') { // 阳光收入动作：飞向顶部计数器，到达后 +25 入账
+      const dx = s.tx - s.x, dy = s.ty - s.y, d = Math.hypot(dx, dy);
+      if (d <= 14) {
+        game.sun += SUN_VALUE;
+        addParticle(s.tx, s.ty, 'sunPop');
+        sfx('sun');
+        game.suns.splice(i, 1);
+        continue;
+      }
+      const sp = Math.min(640 * dt, d);
+      s.x += dx / d * sp; s.y += dy / d * sp;
+      continue;
+    }
+    s.age += dt;
+    if (game.autoSun && s.age > 0.7) { s.state = 'fly'; s.tx = SUN_TX; s.ty = SUN_TY; continue; }
+    if (s.y < s.targetY) { s.y += s.vy * dt; }        // 下落阶段
+    else { s.x += s.vx * dt * 0.3; if (s.x < 30 || s.x > W - 30) s.vx *= -1; } // 落地轻飘
+    s.life -= dt;
+    if (s.life <= 0) game.suns.splice(i, 1);
+  }
+}
+
+// 单个植物的行为逻辑（按类型分派）
+function updatePlant(p, dt) {
+  p.flash = Math.max(0, p.flash - dt);
+  // 双发射手：第一发之后 0.13 秒补第二发
+  if (p.second > 0) {
+    p.second -= dt;
+    if (p.second <= 0) { p.second = 0; shootPea(p); }
+  }
+  switch (p.type) {
+    case 'sunflower': // 每 15s 产一个阳光，落在自己身上
+      p.timer -= dt;
+      if (p.timer <= 0) { spawnSun(p.x + rand(-6, 6), p.y - 42, p.y + 18); p.timer = SUNFLOWER_INTERVAL; }
+      break;
+    case 'peashooter': case 'snowpea': case 'firepea': case 'repeater': // 四种射手：同行右侧有僵尸才发射，每 1.4s 一轮
+      if (hasZombieAhead(p)) {
+        p.timer -= dt;
+        if (p.timer <= 0) {
+          if (p.type === 'snowpea') shootIcePea(p);
+          else if (p.type === 'firepea') shootFirePea(p);
+          else if (p.type === 'repeater') { shootPea(p); p.second = REPEATER_GAP; }
+          else shootPea(p);
+          p.timer = PEA_INTERVAL;
+        }
+      } else p.timer = Math.max(0, p.timer);
+      break;
+    case 'melonpult': case 'wintermelon': { // 本行投射：本行有僵尸才投，优先打本行最靠左（威胁最大）的僵尸，弹道逐帧跟踪保证命中
+      let mt = null;
+      for (const z of game.zombies) if (z.hp > 0 && z.row === p.row && (!mt || z.x < mt.x)) mt = z;
+      if (mt) {
+        p.timer -= dt;
+        if (p.timer <= 0) {
+          if (p.type === 'wintermelon') throwIceMelon(p, mt);
+          else throwMelon(p, mt);
+          p.timer = MELON_INTERVAL;
+        }
+      } else p.timer = Math.max(0, p.timer);
+      break;
+    }
+    case 'squash': { // 倭瓜：前后 1.5 格内最近的僵尸都能砸（防止僵尸已经走过头就砸不到）
+      let tgt = null, best = Infinity;
+      for (const z of game.zombies) {
+        if (z.hp <= 0 || z.row !== p.row) continue;
+        const d = Math.abs(z.x - p.x);
+        if (d <= CELL_W * 1.5 && d < best) { best = d; tgt = z; }
+      }
+      if (tgt) {
+        instantBlast(tgt, SQUASH_DAMAGE, false);   // 非巨人必杀；巨人 1800
+        addParticle(p.x, p.y, 'explode');
+        sfx('boom');
+        p.hp = 0;                       // 砸完自身消失
+      }
+      break;
+    }
+    case 'jalapeno': // 火爆辣椒：1s 引信后烧穿整行；非巨人必杀，巨人 1800，并清除本行冰道
+      p.fuse -= dt;
+      if (p.fuse <= 0) {
+        for (const z of game.zombies) if (z.row === p.row && z.hp > 0) instantBlast(z, JALAPENO_DAMAGE, true);
+        game.iceTracks = game.iceTracks.filter(t => t.row !== p.row);   // 清除本行冰道
+        addParticle(p.x, p.y, 'explode');
+        sfx('boom');
+        p.hp = 0;
+      }
+      break;
+    case 'cherrybomb': // 樱桃炸弹：1.1s 引信后炸开九宫格；非巨人必杀，巨人 1800
+      p.fuse -= dt;
+      if (p.fuse <= 0) {
+        for (const z of game.zombies) {
+          if (z.hp > 0 && Math.abs(z.row - p.row) <= 1 && Math.abs(z.x - p.x) <= CHERRY_RADIUS)
+            instantBlast(z, CHERRY_DAMAGE, true);
+        }
+        addParticle(p.x, p.y, 'explode');
+        addParticle(p.x, p.y - 26, 'explode');
+        sfx('boom');
+        p.hp = 0;
+      }
+      break;
+    case 'potatomine': // 预热 → 就绪 → 本行僵尸进到一格范围即引爆（撑杆跳僵尸起跳前不会被引爆，它会跳过地雷）
+      if (!p.armed) {
+        p.timer -= dt;
+        if (p.timer <= 0) p.armed = true;
+      } else {
+        const z = game.zombies.find(z => z.row === p.row && z.hp > 0 && !z.poleActive && Math.abs(z.x - p.x) <= CELL_W * 0.95);
+        if (z) explodeMine(p);
+      }
+      break;
+    case 'chomper': // 空闲时吞正前方一格内僵尸，吞完进入 42s 咀嚼
+      if (p.chewing) {
+        p.chewTimer -= dt;
+        if (p.chewTimer <= 0) p.chewing = false;
+      } else {
+        const z = game.zombies.find(z => z.row === p.row && z.hp > 0 && !z.garg &&
+            z.x >= p.x + CELL_W * 0.10 && z.x <= p.x + CELL_W * 1.15);
+        if (z) {
+          z.hp = 0;                        // 被吞（本帧末统一清理）
+          addParticle(z.x, z.y, 'swallow');
+          p.chewing = true;
+          p.chewTimer = CHOMER_CHEW;
+        }
+      }
+      break;
+  }
+}
+// 同行右侧是否存在僵尸（植物开火的前提）
+function hasZombieAhead(p) {
+  return game.zombies.some(z => z.row === p.row && z.hp > 0 && z.x > p.x - 8);
+}
+// 地雷引爆：本行一格范围内非巨人必杀、巨人吃 1800（爆炸伤害无视铁门），自身消失
+function explodeMine(p) {
+  addParticle(p.x, p.y, 'explode');
+  sfx('boom');
+  for (const z of game.zombies) {
+    if (z.row === p.row && z.hp > 0 && Math.abs(z.x - p.x) <= CELL_W * 1.1) instantBlast(z, MINE_DAMAGE, true);
+  }
+  p.hp = 0;
+}
+
+// 子弹：豌豆（普通/冰/火）直线命中即消失；西瓜（普通/冰）本行抛物线投掷，落点直伤 + 范围溅射
+function updateProjectiles(dt) {
+  for (let i = game.projectiles.length - 1; i >= 0; i--) {
+    const pr = game.projectiles[i];
+    if (pr.kind === 'melon' || pr.kind === 'iceMelon') {
+      // 西瓜 / 冰瓜：目标每帧跟踪僵尸当前位置（本行弹道），抛物线（sin 弧度拱起）飞行，保证落点命中
+      if (pr.tgt && pr.tgt.hp > 0) { pr.ex = pr.tgt.x; pr.ey = pr.tgt.y; }
+      pr.t += dt / pr.dur;
+      const f = clamp(pr.t, 0, 1);
+      pr.x = pr.sx + (pr.ex - pr.sx) * f;
+      pr.y = pr.sy + (pr.ey - pr.sy) * f - Math.sin(Math.PI * f) * (pr.arc || 88);
+      if (pr.t >= 1) { // 落地：落点最近僵尸吃 80 直伤，其余溅射 40；冰瓜再附带减速并留下冰道
+        let nearest = null, nd = Infinity;
+        for (const z of game.zombies) {
+          if (z.hp <= 0) continue;
+          const d = dist(z.x, z.y, pr.x, pr.y);
+          if (d <= MELON_RADIUS && d < nd) { nd = d; nearest = z; }
+        }
+        if (nearest) {
+          damageZombie(nearest, MELON_DAMAGE);
+          if (pr.kind === 'iceMelon') slowZombie(nearest);
+          for (const z of game.zombies) {
+            if (z !== nearest && z.hp > 0 && dist(z.x, z.y, pr.x, pr.y) <= MELON_RADIUS) {
+              damageZombie(z, MELON_SPLASH);
+              if (pr.kind === 'iceMelon') slowZombie(z);
+            }
+          }
+        }
+        if (pr.kind === 'iceMelon') addIceTrack(pr.row, clamp(Math.floor(pr.x / CELL_W), 0, COLS - 1));
+        addParticle(pr.x, pr.y, 'melonSplash');
+        game.projectiles.splice(i, 1);
+      }
+      continue;
+    }
+    // 豌豆（普通 / 冰 / 火）：同行直线弹道，命中即消失
+    pr.x += pr.vx * dt;
+    if (pr.x > W + 60) { game.projectiles.splice(i, 1); continue; } // 出界销毁
+    let tgt = null;
+    for (const z of game.zombies) {
+      // 只命中子弹前方 / 正在重叠的僵尸，避免打到子弹已经飞过的目标
+      const d = z.x - pr.x;
+      if (z.row === pr.row && z.hp > 0 && d >= -8 && d <= 42) {
+        if (!tgt || z.x < tgt.x) tgt = z;
+      }
+    }
+    if (!tgt) continue;
+    if (pr.kind === 'firePea') {                 // 烈焰豌豆：40 直伤 + 小范围溅射 13，主目标附带灼烧
+      damageZombie(tgt, FIRE_PEA_DAMAGE);
+      tgt.burnTimer = FIRE_BURN_TIME;            // 命中刷新灼烧 3 秒（每秒 10 点真实伤害）
+      for (const z of game.zombies) {
+        if (z !== tgt && z.hp > 0 && dist(z.x, z.y, pr.x, pr.y) <= FIRE_PEA_RADIUS)
+          damageZombie(z, FIRE_PEA_SPLASH);
+      }
+    } else {                                     // 普通豌豆 / 冰豌豆：20 伤害，冰豌豆附加减速 + 冰道
+      damageZombie(tgt, PEA_DAMAGE);
+      if (pr.kind === 'icePea') {
+        slowZombie(tgt);
+        addIceTrack(pr.row, clamp(Math.floor(pr.x / CELL_W), 0, COLS - 1));
+      }
+    }
+    addParticle(pr.x, pr.y, 'hit');
+    sfx('hit');
+    game.projectiles.splice(i, 1);
+  }
+}
+
+// 僵尸：撑杆跳 → 移动 / 啃食 → 到达最左侧触发小推车或判负
+function updateZombies(dt) {
+  for (const z of game.zombies) {
+    if (z.hp <= 0) continue;
+    z.flash = Math.max(0, z.flash - dt);
+    if (z.slowTimer > 0) z.slowTimer -= dt;   // 寒冰减速倒计时
+    if (z.burnTimer > 0) {                    // 烈焰灼烧：每秒 10 点真实伤害（直扣本体，无视护甲）
+      z.burnTimer -= dt;
+      z.burnAcc += dt;
+      while (z.burnAcc >= 1) { z.burnAcc -= 1; z.hp -= FIRE_BURN_DPS; z.flash = Math.max(z.flash, 0.08); }
+    }
+
+    // 撑杆跳：前方即将进入的格子里有「非坚果」植物 → 跳过它（杆子消失，速度变普通）
+    if (z.poleActive) {
+      const frontCol = Math.floor((z.x - z.speed * dt) / CELL_W);
+      if (frontCol >= 0 && frontCol < COLS) {
+        const p = plantAt(z.row, frontCol);
+        if (p && p.type !== 'wallnut' && p.type !== 'tallnut') {
+          z.x = p.x - CELL_W * 0.6 - 10;  // 落到该植物左侧
+          z.poleActive = false;
+          z.speed = game.diff.normalSpeed * z.spdMul;
+          z.name = '普通僵尸';
+          z.color = ZOMBIE_TYPES.normal.color;
+          addParticle(z.x, z.y, 'jump');
+          continue;
+        }
+      }
+    }
+
+    // 当前所在格子的植物：有 → 顶住啃食；没有 → 继续左走
+    const col = clamp(Math.floor(z.x / CELL_W), 0, COLS - 1);
+    const p = plantAt(z.row, col);
+    if (p) {
+      z.x = Math.min(z.x, p.x + CELL_W * 0.35);   // 顶在植物上
+      if (z.garg) {
+        // 巨人僵尸：直接砸扁碰到的植物（秒杀），砸完停顿一下再走
+        if (z.smashTimer <= 0) {
+          p.hp = 0;                                 // 砸扁植物
+          addParticle(p.x, p.y, 'explode');
+          sfx('boom');
+          z.smashTimer = 1.1;                       // 砸完停顿
+        } else z.smashTimer -= dt;
+        z.eating = false;
+      } else {
+        z.eating = true;
+        z.bitePhase += dt;
+        p.hp -= ZOMBIE_BITE * dt;                   // 持续啃食
+        p.flash = Math.max(p.flash, 0.08);
+        sfx('eat');
+        if (p.hp <= 0) p.hp = 0;                    // 血量归零 → 过滤时移除
+      }
+    } else {
+      z.eating = false;
+      if (z.smashTimer > 0) z.smashTimer -= dt;     // 巨人砸扁后停顿
+      else z.x -= zombieSpeed(z) * dt;              // 移动（被减速 / 冰道上时移速减半）
+    }
+    // 巨人僵尸：血量降到一半时抛出一只小鬼僵尸向前进攻（只抛一次）
+    if (z.garg && !z.impThrown && z.hp <= z.maxHp / 2) {
+      z.impThrown = true;
+      const im = createZombie('imp', z.row);
+      im.x = z.x - CELL_W * 1.8;                    // 抛到前方约两格
+      addParticle(z.x, z.y, 'jump');
+    }
+    // 小推车：僵尸碰到本行最左推车 → 推车启动；本行没有推车（且无正在冲刺的推车）→ 僵尸进屋，游戏失败
+    if (z.x < CART_X) {
+      const moving = game.cartsMoving.some(c => c.row === z.row);
+      if (game.carts[z.row] && !moving) {   // 该行推车还在 → 启动
+        game.carts[z.row] = false;          // 触发一次永久消失
+        game.cartsMoving.push({ row: z.row, x: CART_X });
+        addParticle(CART_X, z.y, 'jump');
+        showToast('第 ' + (z.row + 1) + ' 行推车已启动！');
+      } else if (!moving) {                 // 推车已用完 → 僵尸进屋，失败
+        game.over = true;
+      }
+      // 有推车正在冲刺：交给 updateCarts 秒杀，不判失败
+    }
+  }
+}
+
+// 小推车冲刺：从左向右高速推进，秒杀本行所有僵尸（含巨人）、碾碎沿途植物，冲出屏幕后消失
+function updateCarts(dt) {
+  if (game.cartsMoving.length === 0) return;
+  const step = 1 / 120;          // 细步进积分，保证高速下不会跳过格内僵尸/植物
+  let t = 0;
+  while (t < dt) {
+    const s = Math.min(step, dt - t);
+    t += s;
+    for (const c of game.cartsMoving) {
+      c.x += CART_SPEED * s;
+      // 秒杀本行碰撞到的僵尸（巨人同样直接秒杀）
+      for (const z of game.zombies) {
+        if (z.row === c.row && z.hp > 0 && Math.abs(z.x - c.x) < 45) {
+          z.hp = 0;
+          addParticle(z.x, z.y, 'hit');
+        }
+      }
+      // 碾碎沿途植物
+      const col = clamp(Math.floor(c.x / CELL_W), 0, COLS - 1);
+      const p = plantAt(c.row, col);
+      if (p) p.hp = 0;
+    }
+  }
+  // 冲出屏幕的小推车移除（只作用本行，不影响其他行）
+  for (let i = game.cartsMoving.length - 1; i >= 0; i--) {
+    if (game.cartsMoving[i].x > W + 60) game.cartsMoving.splice(i, 1);
+  }
+}
+
+// 特效推进
+function updateParticles(dt) {
+  for (let i = game.particles.length - 1; i >= 0; i--) {
+    game.particles[i].age += dt;
+    if (game.particles[i].age >= durationOf(game.particles[i].kind)) game.particles.splice(i, 1);
+  }
+}
+/* ============================ 6. 绘制 ============================ */
+function draw() {
+  if (game.failVideo) { drawFailVideo(); return; }         // 失败结局短片（4s）
+  if (game.result) { drawResult(); return; }               // 结算界面
+  if (!game.started) {                                     // 非战斗界面
+    if (game.screen === 'pick') drawPick();
+    else if (game.screen === 'diff') drawDiff();
+    else if (game.screen === 'level') drawLevel();
+    else if (game.screen === 'mode') drawMode();
+    else if (game.screen === 'intro') drawIntro();
+    else drawHome();
+    if (game.toast) drawToast();
+    return;
+  }
+  drawBattleField();
+  drawSuns(true);     // 正在飞向计数器的阳光画在 HUD 之上，保证收入动画可见
+  drawHUD();
+  drawPlantBar();
+  drawGhost();
+  if (game.warn) drawWarning();   // 红字警告（开局提示 / 大波提示）
+  if (game.toast) drawToast();
+  if (game.over) drawGameOver();
+  if (game.paused) drawPaused();  // 暂停：半透明遮罩 + 菜单
+}
+// 草坪内的所有战斗对象统一裁剪到草坪区域：
+// 这样从天而降的阳光、第一行的僵尸名字/血条、西瓜的抛物线都不会画到顶部信息条上。
+function drawBattleField() {
+  drawBackground();
+  drawGrid();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, GRID_TOP, W, H - BAR_H - GRID_TOP);
+  ctx.clip();
+  drawIceTracks();   // 冰道（寒冰减速区域）
+  drawCarts();     // 静止的小推车画在植物后面，避免挡住第一列植物
+  drawPlants();
+  drawZombies();
+  drawCartsMoving(); // 冲刺中的推车画在僵尸前面，强调秒杀
+  drawProjectiles();
+  drawSuns(false);
+  drawParticles();
+  ctx.restore();
+}
+
+/* ---------- 进度存档（localStorage 持久化，try 兜底） ---------- */
+// 解锁进度内部允许到 LEVEL_COUNT + 1：第 14 关通关后记 15，用来显示"全部通关"
+function levelUnlocked() {
+  try {
+    const n = parseInt(localStorage.getItem('pzxs_unlocked') || '1', 10);
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(Math.max(n, 1), LEVEL_COUNT + 1);
+  } catch (e) { return 1; }
+}
+function saveUnlocked(n) {
+  try { localStorage.setItem('pzxs_unlocked', String(Math.min(Math.max(n, 1), LEVEL_COUNT + 1))); } catch (e) {}
+}
+// 历史最佳（最高波次 / 最高击杀），首页展示
+function loadBest() {
+  try {
+    const b = JSON.parse(localStorage.getItem('pzxs_best') || 'null');
+    if (b && Number.isFinite(b.wave) && Number.isFinite(b.kills || 0)) {
+      game.best = { wave: Math.max(1, Math.floor(b.wave)), kills: Math.max(0, Math.floor(b.kills || 0)) };
+    }
+  } catch (e) {}
+}
+function recordBest() {
+  let changed = false;
+  if (game.wave > game.best.wave) { game.best.wave = game.wave; changed = true; }
+  if (game.stats.kills > game.best.kills) { game.best.kills = game.stats.kills; changed = true; }
+  game.newRecord = game.newRecord || changed;   // 中途退出时可能已经记过一次，保留"新纪录"提示
+  if (changed) { try { localStorage.setItem('pzxs_best', JSON.stringify(game.best)); } catch (e) {} }
+}
+// 设置项（音效 / 自动收阳光 / 倍速）持久化
+function loadSettings() {
+  try {
+    const s = JSON.parse(localStorage.getItem('pzxs_settings') || 'null');
+    if (!s) return;
+    if (typeof s.sound === 'boolean') game.sound = s.sound;
+    if (typeof s.autoSun === 'boolean') game.autoSun = s.autoSun;
+    if (s.speed === 2) game.speed = 2;
+  } catch (e) {}
+}
+function saveSettings() {
+  try { localStorage.setItem('pzxs_settings', JSON.stringify({ sound: game.sound, autoSun: game.autoSun, speed: game.speed })); } catch (e) {}
+}
+// 关卡通关：解锁下一关 + 刷新记录 + 结算
+function winLevel() {
+  if (game.result) return;
+  if (game.level >= levelUnlocked()) saveUnlocked(game.level + 1);
+  recordBest();
+  sfx('win');
+  game.result = { win: true, wave: game.wave, time: game.time, kills: game.stats.kills };
+}
+
+/* ---------- 首页：游戏简介 / 模式选择 ---------- */
+const HOME_INTRO = { x: W / 2 - 140, y: 292, w: 280, h: 56 };
+const HOME_MODE  = { x: W / 2 - 140, y: 368, w: 280, h: 56 };
+function drawHome() {
+  if (updateAvailable) {
+    ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 20px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('正在更新到最新版…', W / 2, H / 2);
+    refreshToLatest();
+    return;
+  }
+  ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 40px "Microsoft YaHei",sans-serif';
+  ctx.fillText('僵尸想上学', W / 2, 90);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '14px "Microsoft YaHei",sans-serif';
+  ctx.fillText('偷不到脑子，只好读书长脑子——目标：小屁孩的课本！', W / 2, 140);
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('原型：植物大战僵尸（纯色块改版，无图片无音频文件）', W / 2, 172);
+  // 历史最佳
+  const hasBest = game.best.wave > 1 || game.best.kills > 0;
+  ctx.fillStyle = 'rgba(255,255,255,0.05)'; rr(W / 2 - 170, 198, 340, 58, 10); ctx.fill();
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 15px "Microsoft YaHei",sans-serif';
+  ctx.fillText('最高纪录', W / 2, 218);
+  ctx.fillStyle = '#c8d0da'; ctx.font = '14px "Microsoft YaHei",sans-serif';
+  ctx.fillText(hasBest ? ('第 ' + game.best.wave + ' 波 ｜ 单局击杀 ' + game.best.kills + ' 只') : '还没有记录，先去打一局吧', W / 2, 240);
+  drawButton(HOME_INTRO, '游戏简介', '#4f9a43');
+  drawButton(HOME_MODE, '模式选择', '#e0a817');
+  drawHomeScene();
+}
+// 首页底部小剧场：草坪、植物、课本和一只想来"借"书的僵尸
+function drawHomeScene() {
+  ctx.fillStyle = '#2c3b2b'; rr(110, 470, 500, 118, 18); ctx.fill();
+  ctx.fillStyle = '#335533';
+  for (let i = 0; i < 6; i++) {
+    ctx.globalAlpha = 0.5;
+    rr(116 + i * 82, 476, 78, 106, 10); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // 草坪上的植物
+  drawPlantIcon('sunflower', 178, 538, 1.0);
+  drawPlantIcon('peashooter', 248, 538, 1.0);
+  drawPlantIcon('wallnut', 318, 540, 0.9);
+  // 课本
+  ctx.save();
+  ctx.translate(392, 534);
+  ctx.fillStyle = '#b8433c'; rr(-30, -22, 60, 44, 6); ctx.fill();
+  ctx.fillStyle = '#f3ead6'; rr(-24, -17, 48, 34, 3); ctx.fill();
+  ctx.strokeStyle = '#c9bda4'; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(-18, -11 + i * 8); ctx.lineTo(18, -11 + i * 8); ctx.stroke(); }
+  ctx.fillStyle = '#8a2f2a'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('课本', 0, 24);
+  ctx.restore();
+  // 僵尸（复用战斗里的造型）
+  const demo = {
+    type: 'normal', row: 0, x: 492, y: 538, hp: 200, maxHp: 200,
+    color: '#9aa97b', name: '', eating: false, bitePhase: 0, flash: 0,
+    helmetHp: 0, doorHp: 0, paperHp: 0, poleActive: false, slowTimer: 0, burnTimer: 0, garg: false
+  };
+  drawZombie(demo, false);
+  // 对话框
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; rr(430, 468, 168, 34, 10); ctx.fill();
+  ctx.fillStyle = '#3a3a3a'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('课本，借我抄一下？', 514, 485);
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('偷课本计划 · 进行中', W / 2, 618);
+}
+
+/* ---------- 游戏简介（故事） ---------- */
+const INTRO_BACK = { x: 16, y: 16, w: 108, h: 34 };
+function drawIntro() {
+  ctx.fillStyle = '#1b1e24'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 26px "Microsoft YaHei",sans-serif';
+  ctx.fillText('游戏简介', W / 2, 70);
+  ctx.fillStyle = '#d5dbe3'; ctx.font = '15px "Microsoft YaHei",sans-serif';
+  const lines = [
+    '由于长期以来僵尸都偷不到农夫的脑子，',
+    '所以僵尸觉得自己特别没脑子——这都偷不到，太丢僵尸脸了。',
+    '',
+    '经 7328 次僵尸大会决定：因为我们没脑子，',
+    '所以偷不到脑子，我们决定，要读书长脑子！',
+    '',
+    '但是呢，僵尸发现，读书要课本啊，它们又没课本，怎么办呢。',
+    '聪明的小鬼僵尸提议说：农夫小孩在上学啊，',
+    '他有课本啊，我们可以去"借"他的啊。',
+    '',
+    '所以……僵尸大军们开始了偷课本计划……',
+    '哦不是，是上学计划……',
+  ];
+  lines.forEach((t, i) => ctx.fillText(t, W / 2, 150 + i * 34));
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 16px "Microsoft YaHei",sans-serif';
+  ctx.fillText('—— 僵尸上学计划，正式启动 ——', W / 2, 596);
+  drawButton(INTRO_BACK, '返回', '#5a6472');
+}
+
+/* ---------- 模式选择：关卡模式 / 无尽模式 ---------- */
+const MODE_LEVEL   = { x: W / 2 - 140, y: 280, w: 280, h: 56 };
+const MODE_ENDLESS = { x: W / 2 - 140, y: 362, w: 280, h: 56 };
+function drawMode() {
+  ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 28px "Microsoft YaHei",sans-serif';
+  ctx.fillText('选择模式', W / 2, 90);
+  drawButton(MODE_LEVEL, '关卡模式（共 14 关）', '#4f9a43');
+  drawButton(MODE_ENDLESS, '无尽模式（无限挑战）', '#e0a817');
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('关卡：一关比一关难，通关解锁下一关 ｜ 无尽：难度三档，越打越硬', W / 2, 460);
+  ctx.fillStyle = 'rgba(255,255,255,0.045)'; rr(90, 494, 540, 84, 12); ctx.fill();
+  ctx.fillStyle = '#aeb6c0'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('关卡模式：14 关递进，每关多 1 波、每波僵尸略增', W / 2, 522);
+  ctx.fillText('第 6 / 10 / 14… 波旗帜大波，第 14 关最终波有巨人 BOSS', W / 2, 550);
+  drawButton(INTRO_BACK, '返回', '#5a6472');
+}
+
+/* ---------- 关卡选择：14 关，逐关解锁 ---------- */
+const LEVEL_W = 130, LEVEL_H = 64, LEVEL_GAP = 12;
+const LEVEL_Y0 = 150;
+const LEVEL_ROWS = [4, 4, 4, 2];
+function levelRect(i) { // i = 0~13，四行（4 + 4 + 4 + 2）；最后一行居中
+  const c = i % 4, r = Math.floor(i / 4);
+  const rowCount = LEVEL_ROWS[r] || 4;
+  const x0 = (W - (rowCount * LEVEL_W + (rowCount - 1) * LEVEL_GAP)) / 2;
+  return { x: x0 + c * (LEVEL_W + LEVEL_GAP), y: LEVEL_Y0 + r * (LEVEL_H + LEVEL_GAP), w: LEVEL_W, h: LEVEL_H };
+}
+function drawLevel() {
+  ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 28px "Microsoft YaHei",sans-serif';
+  ctx.fillText('关卡模式', W / 2, 80);
+  const un = levelUnlocked();
+  const shown = Math.min(un, LEVEL_COUNT);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText(un > LEVEL_COUNT ? '全部关卡已通关，可以自由重打任何一关' : ('已解锁 ' + shown + ' / ' + LEVEL_COUNT + ' 关，通关当前关解锁下一关'), W / 2, 118);
+  for (let i = 0; i < LEVEL_COUNT; i++) {
+    const r = levelRect(i);
+    const open = i + 1 <= un;
+    const cleared = i + 1 < un;
+    const hover = open && inRect(mouse, r);
+    ctx.globalAlpha = open ? 1 : 0.45;
+    ctx.fillStyle = open ? (hover ? '#3d4452' : '#343a45') : '#262a33';
+    rr(r.x, r.y, r.w, r.h, 10); ctx.fill();
+    ctx.lineWidth = hover ? 3 : (open ? 2 : 1);
+    ctx.strokeStyle = open ? (hover ? '#fff' : '#ffd23f') : 'rgba(255,255,255,0.15)';
+    rr(r.x, r.y, r.w, r.h, 10); ctx.stroke();
+    ctx.fillStyle = open ? '#e8e8e8' : '#7f8794'; ctx.font = 'bold 19px "Microsoft YaHei",sans-serif';
+    ctx.fillText('第 ' + (i + 1) + ' 关', r.x + r.w / 2, r.y + 25);
+    ctx.fillStyle = cleared ? '#7fd07a' : (open ? '#aeb6c0' : '#666d78'); ctx.font = '12px "Microsoft YaHei",sans-serif';
+    ctx.fillText(open ? (cleared ? '已通关 ｜ ' + (i + 2) + ' 波' : '目标：撑过 ' + (i + 2) + ' 波') : '未解锁', r.x + r.w / 2, r.y + 46);
+    ctx.globalAlpha = 1;
+  }
+  // 通关进度条
+  const cleared = Math.max(0, Math.min(un - 1, LEVEL_COUNT));
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('通关进度 ' + cleared + ' / ' + LEVEL_COUNT, W / 2, 468);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)'; rr(W / 2 - 220, 486, 440, 12, 6); ctx.fill();
+  if (cleared > 0) {
+    ctx.fillStyle = '#ffd23f'; rr(W / 2 - 220, 486, 440 * cleared / LEVEL_COUNT, 12, 6); ctx.fill();
+  }
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText(un > LEVEL_COUNT ? '十四关全通，课本守住了！' : '第 14 关最终波会出现巨人僵尸 BOSS', W / 2, 526);
+  drawButton(INTRO_BACK, '返回', '#5a6472');
+}
+
+/* 无尽难度选择界面（简单 / 中等 / 困难） */
+const DIFF_RECTS = {
+  easy:   { x: W / 2 - 150, y: GRID_TOP + 130, w: 300, h: 54 },
+  medium: { x: W / 2 - 150, y: GRID_TOP + 198, w: 300, h: 54 },
+  hard:   { x: W / 2 - 150, y: GRID_TOP + 266, w: 300, h: 54 }
+};
+function drawDiff() {
+  ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 30px "Microsoft YaHei",sans-serif';
+  ctx.fillText('无尽模式 · 选择难度', W / 2, 64);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '14px "Microsoft YaHei",sans-serif';
+  ctx.fillText('选定后进入选植物环节，对局中不能更换', W / 2, 106);
+  drawButton(DIFF_RECTS.easy,   '简单 ｜ 僵尸少而慢，血量低，解锁慢', '#4f9a43');
+  drawButton(DIFF_RECTS.medium, '中等 ｜ 僵尸更多更快，正常节奏', '#e0a817');
+  drawButton(DIFF_RECTS.hard,   '困难 ｜ 僵尸蜂拥而至，血量更高，解锁更早', '#c94f4f');
+  drawButton(INTRO_BACK, '返回', '#5a6472');
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('无尽模式：波次持续推进，存活越久僵尸越肉越快', W / 2, H - 42);
+}
+
+/* 选卡界面：从全部 14 种植物中挑选最多 10 种出战（中途不可更换），悬停看说明 */
+const PICK_COLS = 7, PICK_W = 96, PICK_H = 80, PICK_GAP = 6;
+const PICK_X0 = (W - (PICK_COLS * PICK_W + (PICK_COLS - 1) * PICK_GAP)) / 2;
+const PICK_Y0 = GRID_TOP + 58;
+function pickRect(i) {
+  const c = i % PICK_COLS, r = Math.floor(i / PICK_COLS);
+  return { x: PICK_X0 + c * (PICK_W + PICK_GAP), y: PICK_Y0 + r * (PICK_H + PICK_GAP), w: PICK_W, h: PICK_H };
+}
+const PICK_CONFIRM = { x: W / 2 - 140, y: H - 92, w: 280, h: 50 };
+const PICK_BACK = { x: 16, y: 16, w: 108, h: 34 };
+// 快速阵容：省去新手在 14 张卡里纠结的时间
+const PRESET_BEGINNER = ['sunflower', 'peashooter', 'wallnut', 'potatomine', 'snowpea', 'repeater', 'squash', 'cherrybomb', 'melonpult', 'jalapeno'];
+const PRESET_POWER = ['sunflower', 'peashooter', 'repeater', 'snowpea', 'firepea', 'melonpult', 'wintermelon', 'wallnut', 'cherrybomb', 'jalapeno'];
+const PICK_PRESET_A = { x: 121, y: 428, w: 150, h: 36 };
+const PICK_PRESET_B = { x: 285, y: 428, w: 150, h: 36 };
+const PICK_CLEAR    = { x: 449, y: 428, w: 150, h: 36 };
+function applyPreset(list) { game.pickedPlants = list.slice(0, 10); }
+function drawPick() {
+  ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 22px "Microsoft YaHei",sans-serif';
+  ctx.fillText('挑选出战植物（最多 10 种）', W / 2, 30);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  const sub = game.mode === 'level'
+    ? ('第 ' + game.level + ' 关 · 目标撑过 ' + game.levelTarget + ' 波')
+    : ('难度：' + game.diff.name);
+  ctx.fillText(sub + ' ｜ 已选 ' + game.pickedPlants.length + ' / 10', W / 2, 60);
+  const full = game.pickedPlants.length >= 10;
+  for (let i = 0; i < PLANT_ORDER.length; i++) {
+    const type = PLANT_ORDER[i], t = PLANT_TYPES[type];
+    const r = pickRect(i);
+    const picked = game.pickedPlants.indexOf(type) >= 0;
+    const dim = full && !picked;
+    const hover = inRect(mouse, r);
+    ctx.globalAlpha = dim ? 0.35 : 1;
+    ctx.fillStyle = picked ? '#4a5568' : (hover ? '#3d4452' : '#343a45');
+    rr(r.x, r.y, r.w, r.h, 8); ctx.fill();
+    ctx.lineWidth = picked ? 3 : (hover ? 2 : 1);
+    ctx.strokeStyle = picked ? '#ffd23f' : (hover ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.22)');
+    rr(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.20)';
+    ctx.beginPath(); ctx.arc(r.x + r.w / 2, r.y + 26, 20, 0, TAU); ctx.fill();
+    drawPlantIcon(type, r.x + r.w / 2, r.y + 26, 0.54);
+    ctx.fillStyle = '#e8e8e8'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(t.name, r.x + r.w / 2, r.y + 50);
+    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px "Microsoft YaHei",sans-serif';
+    ctx.beginPath(); ctx.arc(r.x + r.w / 2 - 16, r.y + 66, 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'left';
+    ctx.fillText(String(t.cost), r.x + r.w / 2 - 8, r.y + 67);
+    if (picked) { // 已选：卡片左上角显示出战顺序编号
+      const idx = game.pickedPlants.indexOf(type) + 1;
+      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px "Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('#' + idx, r.x + 6, r.y + 5);
+    }
+    ctx.globalAlpha = 1;
+  }
+  // 说明区：鼠标悬停哪张卡就显示哪种植物
+  let hover = null;
+  for (let i = 0; i < PLANT_ORDER.length; i++) if (inRect(mouse, pickRect(i))) hover = PLANT_ORDER[i];
+  const ib = { x: 60, y: 302, w: 600, h: 92 };
+  ctx.fillStyle = 'rgba(255,255,255,0.045)'; rr(ib.x, ib.y, ib.w, ib.h, 10); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+  rr(ib.x, ib.y, ib.w, ib.h, 10); ctx.stroke();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  if (hover) {
+    const t = PLANT_TYPES[hover];
+    ctx.fillStyle = t.color; ctx.font = 'bold 17px "Microsoft YaHei",sans-serif';
+    ctx.fillText(t.name, ib.x + 20, ib.y + 24);
+    ctx.fillStyle = '#9aa3ad'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+    ctx.fillText('阳光 ' + t.cost + ' ｜ 种植冷却 ' + (t.cd || PLANT_COOLDOWN) + 's ｜ 血量 ' + t.hp, ib.x + 20, ib.y + 50);
+    ctx.fillStyle = '#d5dbe3'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+    ctx.fillText(t.desc, ib.x + 20, ib.y + 74);
+  } else {
+    ctx.fillStyle = '#7f8794'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+    ctx.fillText('点植物卡片加入出战名单，再点一次取消（最多 10 种）', ib.x + 20, ib.y + 30);
+    ctx.fillText('悬停可以看说明，对局里只能种本局选的植物', ib.x + 20, ib.y + 58);
+  }
+  // 快速阵容
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('快速阵容', 121, 416);
+  drawButton(PICK_PRESET_A, '新手推荐', '#3f6f9a');
+  drawButton(PICK_PRESET_B, '火力推荐', '#8a5a2e');
+  drawButton(PICK_CLEAR, '清空选择', '#4a5568');
+  // 新手提示，填满中间的留白
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('小提示：前两列种向日葵攒阳光，后面放射手；坚果放在靠僵尸的一侧。', W / 2, 496);
+  ctx.fillText('第 6 / 10 / 14… 波是旗帜大波，第 14 关最后一波会出现巨人僵尸。', W / 2, 520);
+  drawButton(PICK_CONFIRM, '确定出战（' + game.pickedPlants.length + '/10）', '#4f9a43');
+  drawButton(PICK_BACK, '返回', '#5a6472');
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('对局中不能再换植物，选好了再出门', W / 2, H - 24);
+}
+
+// 背景：草坪棋盘格 + 上下功能条底色
+function drawBackground() {
+  ctx.fillStyle = '#23262c';
+  ctx.fillRect(0, 0, W, H);
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) {
+    ctx.fillStyle = (r + c) % 2 === 0 ? '#4f9a43' : '#58a54b';
+    ctx.fillRect(c * CELL_W, GRID_TOP + r * CELL_H, CELL_W, CELL_H);
+  }
+  ctx.fillStyle = '#2e323a'; ctx.fillRect(0, 0, W, GRID_TOP);      // 顶部信息条
+  ctx.fillStyle = '#26292f'; ctx.fillRect(0, H - BAR_H, W, BAR_H);  // 底部选卡栏
+}
+// 网格线与右侧出生警示线
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(0,0,0,0.10)'; ctx.lineWidth = 1;
+  for (let c = 0; c <= COLS; c++) {
+    ctx.beginPath(); ctx.moveTo(c * CELL_W, GRID_TOP); ctx.lineTo(c * CELL_W, H - BAR_H); ctx.stroke();
+  }
+  for (let r = 0; r <= ROWS; r++) {
+    ctx.beginPath(); ctx.moveTo(0, GRID_TOP + r * CELL_H); ctx.lineTo(W, GRID_TOP + r * CELL_H); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath(); ctx.moveTo(W - 6, GRID_TOP); ctx.lineTo(W - 6, H - BAR_H); ctx.stroke();
+}
+
+// 冰道：寒冰命中落点留下的浅蓝冰霜，持续减速经过的僵尸
+function drawIceTracks() {
+  for (const t of game.iceTracks) {
+    ctx.fillStyle = 'rgba(120,190,255,0.30)';
+    rr(t.col * CELL_W + 3, GRID_TOP + t.row * CELL_H + 3, CELL_W - 6, CELL_H - 6, 8); ctx.fill();
+    ctx.strokeStyle = 'rgba(190,225,255,0.55)'; ctx.lineWidth = 1.5;
+    rr(t.col * CELL_W + 3, GRID_TOP + t.row * CELL_H + 3, CELL_W - 6, CELL_H - 6, 8); ctx.stroke();
+  }
+}
+
+// 阳光图标（圆 + 8 条光芒，纯色块）
+function drawSunIcon(x, y, r) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = '#ffd23f';
+  ctx.strokeStyle = '#ffd23f';
+  ctx.lineWidth = r * 0.35; ctx.lineCap = 'round';
+  for (let i = 0; i < 8; i++) {
+    ctx.rotate(TAU / 8);
+    ctx.beginPath(); ctx.moveTo(r * 0.8, 0); ctx.lineTo(r * 1.5, 0); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(0, 0, r * 0.85, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+// 圆角按钮
+function drawButton(rect, label, bg) {
+  const hover = inRect(mouse, rect);
+  ctx.fillStyle = bg;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill();
+  if (hover) {
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill();
+  }
+  ctx.strokeStyle = hover ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.stroke();
+  // 长标签自动缩小字号，避免难度说明之类的文字撑出按钮
+  let fs = 16;
+  do {
+    ctx.font = 'bold ' + fs + 'px "Microsoft YaHei",sans-serif';
+    if (ctx.measureText(label).width <= rect.w - 20 || fs <= 12) break;
+    fs--;
+  } while (true);
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
+}
+// 顶部信息条上的小方块按钮（暂停 / 倍速 / 退出）
+function drawMiniButton(rect, label, bg) {
+  const hover = inRectPad(mouse, rect, 6);
+  ctx.fillStyle = bg;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill();
+  if (hover) { ctx.fillStyle = 'rgba(255,255,255,0.16)'; rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill(); }
+  ctx.strokeStyle = hover ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.30)'; ctx.lineWidth = 1.5;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
+}
+// 暂停菜单里的开关行
+function drawToggle(rect, label, on) {
+  const hover = inRect(mouse, rect);
+  ctx.fillStyle = on ? 'rgba(79,154,67,0.85)' : 'rgba(255,255,255,0.10)';
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill();
+  ctx.strokeStyle = hover ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1.5;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.stroke();
+  ctx.fillStyle = '#e8e8e8'; ctx.font = '14px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, rect.x + 16, rect.y + rect.h / 2 + 1);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = on ? '#fff' : '#9aa3ad';
+  ctx.fillText(on ? '开' : '关', rect.x + rect.w - 16, rect.y + rect.h / 2 + 1);
+}
+
+/* 顶部信息条：阳光 + 波次进度 + 存活时间 + 暂停 / 倍速 / 退出 */
+const RECT_PAUSE = { x: W - 140, y: 10, w: 40, h: 40 };
+const RECT_SPEED = { x: W - 96,  y: 10, w: 40, h: 40 };
+const RECT_EXIT  = { x: W - 52,  y: 10, w: 40, h: 40 };
+function drawHUD() {
+  drawSunIcon(30, 30, 12);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 22px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(game.sun >= 10000 ? (game.sun / 1000).toFixed(1) + 'k' : String(game.sun), 48, 32);
+
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  const waveLine = game.mode === 'level'
+    ? '第 ' + game.level + ' 关 ｜ 波 ' + Math.min(game.wave, game.levelTarget) + '/' + game.levelTarget
+    : (game.diff.name + ' ｜ 第 ' + game.wave + ' 波');
+  ctx.fillText(waveLine, 112, 22);
+  ctx.fillText('存活 ' + fmtTime(game.time) + ' ｜ 击杀 ' + game.stats.kills, 112, 42);
+
+  // 本波进度条（清波比例；大波待发时红色脉动）
+  const bx = 306, by = 24, bw = 252, bh = 8;
+  ctx.fillStyle = 'rgba(255,255,255,0.13)'; rr(bx, by, bw, bh, 4); ctx.fill();
+  let label = '';
+  if (game.bigPending) {
+    const a = prefersReduced ? 1 : 0.45 + 0.55 * Math.abs(Math.sin(game.time * 4));
+    ctx.globalAlpha = a; ctx.fillStyle = '#e22d2d'; rr(bx, by, bw, bh, 4); ctx.fill(); ctx.globalAlpha = 1;
+    label = '一大波僵尸 ' + Math.max(1, Math.ceil(game.bigTimer)) + 's 后到达';
+  } else if (game.waveTotal > 0) {
+    const frac = clamp(game.waveKilled / game.waveTotal, 0, 1);
+    if (frac > 0) { ctx.fillStyle = '#58c458'; rr(bx, by, Math.max(4, bw * frac), bh, 4); ctx.fill(); }
+    label = '本波 ' + Math.min(game.waveKilled, game.waveTotal) + ' / ' + game.waveTotal;
+  }
+  ctx.fillStyle = '#7f8794'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, bx, by + 20);
+
+  drawMiniButton(RECT_PAUSE, game.paused ? '继续' : '暂停', game.paused ? '#4f9a43' : '#4a5568');
+  drawMiniButton(RECT_SPEED, game.speed + 'x', game.speed > 1 ? '#e0a817' : '#4a5568');
+  drawMiniButton(RECT_EXIT, '退出', '#7a4a4a');
+}
+
+/* 底部选卡栏：本局选中的植物（最多 10 种）+ 铲子 */
+const CARD_W = 60, CARD_GAP = 4;
+const BAR_Y = H - BAR_H;
+function barItems() { return game.pickedPlants.concat('shovel'); }
+function cardX0(n) { return (W - (n * CARD_W + (n - 1) * CARD_GAP)) / 2; }
+function drawPlantBar() {
+  const items = barItems(), CARD_X0 = cardX0(items.length);
+  for (let i = 0; i < items.length; i++) {
+    const type = items[i], t = PLANT_TYPES[type];
+    const x = CARD_X0 + i * (CARD_W + CARD_GAP), y = BAR_Y + 8;
+    const selected = game.selected === type;
+    const isShovel = type === 'shovel';
+    const afford = isShovel || game.sun >= t.cost;
+    const hovered = inRect(mouse, { x, y, w: CARD_W, h: 94 });
+    // 卡片底
+    ctx.fillStyle = selected ? '#4a5568' : (hovered ? '#3d4452' : '#343a45');
+    rr(x, y, CARD_W, 94, 8); ctx.fill();
+    ctx.lineWidth = selected ? 3 : (hovered ? 2 : 1);
+    ctx.strokeStyle = selected ? '#ffd23f' : (hovered ? 'rgba(255,255,255,0.70)' : (afford ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)'));
+    rr(x, y, CARD_W, 94, 8); ctx.stroke();
+    ctx.globalAlpha = afford ? 1 : 0.45; // 阳光不足时整卡变暗
+    if (isShovel) { // 铲子图标：斜柄 + 灰色圆铲头
+      ctx.strokeStyle = '#c98d5f'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x + CARD_W / 2 + 9, y + 16); ctx.lineTo(x + CARD_W / 2 - 7, y + 38); ctx.stroke();
+      ctx.fillStyle = '#b9c0c9';
+      ctx.beginPath(); ctx.arc(x + CARD_W / 2 - 8, y + 42, 9, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x + CARD_W / 2 - 8, y + 42, 9, 0, TAU); ctx.stroke();
+    } else {
+      // 植物小像：和草坪上的造型一致，方便快速辨认
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.beginPath(); ctx.arc(x + CARD_W / 2, y + 30, 19, 0, TAU); ctx.fill();
+      drawPlantIcon(type, x + CARD_W / 2, y + 31, 0.55);
+    }
+    // 名字
+    ctx.fillStyle = '#e8e8e8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(isShovel ? '铲子' : t.name, x + CARD_W / 2, y + 56);
+    // 花费（小太阳点 + 数字）；铲子显示「免费」
+    ctx.fillStyle = afford ? '#ffd23f' : '#ff8080';
+    ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'left';
+    if (!isShovel) { ctx.beginPath(); ctx.arc(x + CARD_W / 2 - 20, y + 74, 5, 0, TAU); ctx.fill(); }
+    ctx.fillText(isShovel ? '免费' : String(t.cost), x + CARD_W / 2 - 8, y + 75);
+    ctx.globalAlpha = 1;
+    const cdLeft = game.cd[type] || 0;
+    if (cdLeft > 0 && !isShovel) { // 该植物单独冷却：卡片变暗 + 显示倒计时
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; rr(x + 4, y + 4, CARD_W - 8, 86, 6); ctx.fill();
+      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(cdLeft.toFixed(1) + 's', x + CARD_W / 2, y + 47);
+    }
+  }
+}
+// 种植预览：鼠标悬停草坪时显示半透明植物
+function drawGhost() {
+  if (!game.selected || game.paused || game.over) return;
+  if (!(mouse.y >= GRID_TOP && mouse.y < GRID_TOP + CELL_H * ROWS && mouse.x >= 0 && mouse.x < W)) return;
+  const col = clamp(Math.floor(mouse.x / CELL_W), 0, COLS - 1);
+  const row = clamp(Math.floor((mouse.y - GRID_TOP) / CELL_H), 0, ROWS - 1);
+  if (game.selected === 'shovel') { // 铲子预览：有植物的格子显示红色叉
+    const c = cellCenter(col, row);
+    if (plantAt(row, col)) {
+      ctx.globalAlpha = 0.75;
+      ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(c.x - 13, c.y - 13); ctx.lineTo(c.x + 13, c.y + 13);
+      ctx.moveTo(c.x + 13, c.y - 13); ctx.lineTo(c.x - 13, c.y + 13); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    return;
+  }
+  if (plantAt(row, col)) return;   // 已有植物的格子不显示（有僵尸的格子允许种植）
+  if (game.sun < PLANT_TYPES[game.selected].cost) return;
+  const c = cellCenter(col, row);
+  ctx.globalAlpha = 0.42;
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  rr(col * CELL_W + 3, GRID_TOP + row * CELL_H + 3, CELL_W - 6, CELL_H - 6, 8); ctx.fill();
+  drawPlantIcon(game.selected, c.x, c.y, 0.92);
+  ctx.globalAlpha = 1;
+}
+
+// 植物造型（局部坐标以植物中心为原点）：草坪、卡片、选卡、种植预览共用同一套画法
+const PLANT_ICON_STATE = { chewing: false, chewTimer: 0, armed: false, timer: MINE_ARM_TIME, fuse: 0, hp: 1, maxHp: 1 };
+function drawPlantIcon(type, cx, cy, scale) {
+  drawPlantArt(type, cx, cy, PLANT_ICON_STATE, true, scale);
+}
+function drawPlantArt(type, cx, cy, p, icon, scale) {
+  const t = PLANT_TYPES[type];
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (scale && scale !== 1) ctx.scale(scale, scale);
+  ctx.lineCap = 'round';
+
+  // 茎和两片叶子（射手、向日葵、食人花共用）
+  const stem = (h, leafY) => {
+    ctx.strokeStyle = '#3f8f36'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(0, h); ctx.lineTo(0, 2); ctx.stroke();
+    ctx.fillStyle = '#4fae4a';
+    ctx.beginPath(); ctx.ellipse(-10, leafY, 9, 4.5, -0.55, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(10, leafY + 4, 9, 4.5, 0.55, 0, TAU); ctx.fill();
+  };
+  const eye = (x, y, r) => { ctx.fillStyle = '#2c2118'; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
+
+  if (type === 'sunflower') {
+    stem(24, 15);
+    ctx.fillStyle = t.dark;
+    for (let i = 0; i < 12; i++) {
+      const a = i / 12 * TAU;
+      ctx.beginPath(); ctx.ellipse(Math.cos(a) * 14, -5 + Math.sin(a) * 14, 7, 5, a, 0, TAU); ctx.fill();
+    }
+    ctx.fillStyle = t.color;
+    ctx.beginPath(); ctx.arc(0, -5, 11, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#b26a1e'; ctx.beginPath(); ctx.arc(0, -5, 8.5, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#8a4d12';
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * TAU;
+      ctx.beginPath(); ctx.arc(Math.cos(a) * 4.2, -5 + Math.sin(a) * 4.2, 1.3, 0, TAU); ctx.fill();
+    }
+    eye(-3.5, -8, 1.6); eye(3.5, -8, 1.6);
+    ctx.strokeStyle = '#5b3210'; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(0, -3, 3.2, 0.15, Math.PI - 0.15); ctx.stroke();
+  } else if (type === 'peashooter' || type === 'snowpea' || type === 'firepea' || type === 'repeater') {
+    stem(24, 15);
+    ctx.fillStyle = t.color;
+    ctx.beginPath(); ctx.arc(0, -5, type === 'repeater' ? 14 : 13, 0, TAU); ctx.fill();
+    ctx.fillStyle = t.dark;
+    if (type === 'repeater') {
+      rr(7, -12, 25, 11, 5.5); ctx.fill();
+      rr(7, 1, 25, 11, 5.5); ctx.fill();
+      ctx.fillStyle = '#244a20';
+      ctx.beginPath(); ctx.arc(31, -6.5, 3.2, 0, TAU); ctx.arc(31, 6.5, 3.2, 0, TAU); ctx.fill();
+    } else {
+      rr(8, -11, 24, 13, 6); ctx.fill();
+      ctx.fillStyle = '#244a20'; ctx.beginPath(); ctx.arc(31, -4.5, 4, 0, TAU); ctx.fill();
+    }
+    eye(-3, -8, 2);
+    if (type === 'snowpea') {
+      ctx.fillStyle = '#e7f7ff';
+      ctx.beginPath(); ctx.arc(-8, -14, 1.8, 0, TAU); ctx.arc(6, -17, 1.4, 0, TAU); ctx.arc(-11, -3, 1.3, 0, TAU); ctx.fill();
+    } else if (type === 'firepea') {
+      ctx.fillStyle = '#ffd23f';
+      ctx.beginPath(); ctx.moveTo(0, -22); ctx.quadraticCurveTo(8, -29, 3, -35);
+      ctx.quadraticCurveTo(0, -29, -4, -34); ctx.quadraticCurveTo(-3, -27, -7, -23); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff8c3a';
+      ctx.beginPath(); ctx.moveTo(0, -22); ctx.quadraticCurveTo(4, -27, 1, -30);
+      ctx.quadraticCurveTo(-1, -26, -4, -23); ctx.closePath(); ctx.fill();
+    }
+  } else if (type === 'wallnut') {
+    ctx.fillStyle = t.color; rr(-28, -29, 56, 58, 16); ctx.fill();
+    ctx.strokeStyle = t.dark; ctx.lineWidth = 2.5; rr(-28, -29, 56, 58, 16); ctx.stroke();
+    ctx.fillStyle = '#7c5834'; rr(-20, -8, 40, 6, 3); ctx.fill();
+    eye(-10, -16, 3); eye(10, -16, 3);
+    ctx.strokeStyle = '#5b3b1c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, -8, 5, 0.2, Math.PI - 0.2); ctx.stroke();
+    if (p.hp < p.maxHp * 0.55) { // 受伤裂纹
+      ctx.strokeStyle = '#7c5834'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(16, -26); ctx.lineTo(11, -12); ctx.lineTo(17, -5); ctx.lineTo(12, 8); ctx.stroke();
+    }
+  } else if (type === 'tallnut') {
+    ctx.fillStyle = t.color; rr(-20, -40, 40, 78, 13); ctx.fill();
+    ctx.strokeStyle = t.dark; ctx.lineWidth = 2.5; rr(-20, -40, 40, 78, 13); ctx.stroke();
+    ctx.fillStyle = '#8a5a2e'; rr(-15, -20, 30, 6, 3); ctx.fill();
+    eye(-9, -28, 3); eye(9, -28, 3);
+    ctx.strokeStyle = '#5b3b1c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, -20, 5, 0.2, Math.PI - 0.2); ctx.stroke();
+  } else if (type === 'potatomine') {
+    ctx.fillStyle = t.color; rr(-22, -8, 44, 30, 14); ctx.fill();
+    ctx.fillStyle = '#7a4a22';
+    ctx.beginPath(); ctx.arc(-11, 7, 2.2, 0, TAU); ctx.arc(9, 11, 1.8, 0, TAU); ctx.arc(2, 2, 1.5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#4a2f12'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(8, -8); ctx.quadraticCurveTo(17, -22, 24, -17); ctx.stroke();
+    ctx.fillStyle = p.armed ? '#ff5533' : '#ffd23f';
+    ctx.beginPath(); ctx.arc(24, -17, 3, 0, TAU); ctx.fill();
+    if (p.armed) {
+      if (icon) { ctx.fillStyle = '#ff5533'; ctx.beginPath(); ctx.arc(0, -2, 4, 0, TAU); ctx.fill(); }
+      else {
+        const pulse = prefersReduced ? 1 : 0.6 + 0.4 * Math.sin(game.time * 8);
+        ctx.globalAlpha = 0.4 * pulse;
+        ctx.fillStyle = '#ff5533'; ctx.beginPath(); ctx.arc(0, 4, 34, 0, TAU); ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#ff5533'; ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('!', 0, 8);
+      }
+    } else if (!icon) {
+      const frac = clamp(1 - p.timer / MINE_ARM_TIME, 0, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(-16, -28, 32, 5, 2); ctx.fill();
+      ctx.fillStyle = '#ffd23f'; rr(-16, -28, 32 * frac, 5, 2); ctx.fill();
+    }
+  } else if (type === 'chomper') {
+    stem(24, 17);
+    ctx.fillStyle = t.color; rr(-15, -10, 30, 30, 10); ctx.fill();
+    if (p.chewing) {
+      ctx.fillStyle = '#7a161c'; rr(-22, -30, 44, 18, 9); ctx.fill();
+      ctx.strokeStyle = '#5c0f14'; ctx.lineWidth = 2; rr(-22, -30, 44, 18, 9); ctx.stroke();
+      if (!icon) {
+        const prog = 1 - p.chewTimer / CHOMER_CHEW;
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(0, 20, 8, -TAU / 4, -TAU / 4 + TAU * prog); ctx.stroke();
+      }
+    } else {
+      // 朝右张开的大嘴：上颚 + 下颚 + 牙齿
+      ctx.fillStyle = '#8c1c22';
+      ctx.beginPath(); ctx.moveTo(-18, -34); ctx.quadraticCurveTo(24, -30, 28, -10);
+      ctx.quadraticCurveTo(20, -14, 2, -15); ctx.quadraticCurveTo(-12, -16, -18, -20); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-18, 4); ctx.quadraticCurveTo(24, 0, 28, -10);
+      ctx.quadraticCurveTo(16, 2, -2, 4); ctx.quadraticCurveTo(-12, 5, -18, 8); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#f2f2f2';
+      for (let i = 0; i < 4; i++) {
+        const x = -8 + i * 8;
+        ctx.beginPath(); ctx.moveTo(x, -24); ctx.lineTo(x + 4, -24); ctx.lineTo(x + 2, -17); ctx.closePath(); ctx.fill();
+      }
+      eye(-9, -24, 2);
+    }
+  } else if (type === 'melonpult' || type === 'wintermelon') {
+    ctx.fillStyle = t.dark; rr(-22, 3, 44, 21, 8); ctx.fill();
+    ctx.strokeStyle = t.dark; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.moveTo(-12, 6); ctx.lineTo(8, -12); ctx.stroke();
+    ctx.fillStyle = type === 'wintermelon' ? '#6cc4e8' : '#3fae46';
+    ctx.beginPath(); ctx.arc(13, -16, 13, 0, TAU); ctx.fill();
+    ctx.strokeStyle = type === 'wintermelon' ? '#e7f7ff' : '#dff3c8'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(13, -16, 9, -0.9, 0.9); ctx.stroke();
+    ctx.beginPath(); ctx.arc(13, -16, 9, 1.9, 3.2); ctx.stroke();
+    if (type === 'wintermelon') {
+      ctx.fillStyle = '#e7f7ff';
+      ctx.beginPath(); ctx.arc(8, -22, 1.6, 0, TAU); ctx.arc(18, -12, 1.4, 0, TAU); ctx.fill();
+    }
+  } else if (type === 'squash') {
+    ctx.fillStyle = t.color; ctx.beginPath(); ctx.ellipse(0, 2, 23, 21, 0, 0, TAU); ctx.fill();
+    ctx.strokeStyle = t.dark; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(0, 2, 23, 21, 0, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = t.dark; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-14, -9); ctx.lineTo(-4, -13);
+    ctx.moveTo(14, -9); ctx.lineTo(4, -13); ctx.stroke();
+    eye(-7, 0, 3); eye(7, 0, 3);
+    ctx.strokeStyle = '#2c5c28'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 7, 6, 0.2, Math.PI - 0.2); ctx.stroke();
+    ctx.fillStyle = '#2e7d32'; rr(-3, -23, 6, 8, 2); ctx.fill();
+  } else if (type === 'jalapeno') {
+    ctx.fillStyle = t.color;
+    ctx.beginPath(); ctx.moveTo(0, -13);
+    ctx.quadraticCurveTo(11, -6, 10, 9); ctx.quadraticCurveTo(9, 22, 0, 22);
+    ctx.quadraticCurveTo(-10, 19, -10, 5); ctx.quadraticCurveTo(-10, -7, 0, -13); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ff8a7a';
+    ctx.beginPath(); ctx.ellipse(-3, 2, 2.5, 7, -0.15, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#2e7d32'; rr(-3, -22, 7, 10, 3); ctx.fill();
+    if (p.fuse > 0 && !icon) {
+      const blink = prefersReduced ? 1 : 0.5 + 0.5 * Math.sin(game.time * 20);
+      ctx.globalAlpha = 0.35 * blink;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 2, 30, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      const frac = 1 - p.fuse / JALAPENO_FUSE;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(-16, -34, 32, 5, 2); ctx.fill();
+      ctx.fillStyle = '#ffd23f'; rr(-16, -34, 32 * frac, 5, 2); ctx.fill();
+    }
+  } else if (type === 'cherrybomb') {
+    ctx.fillStyle = t.color;
+    ctx.beginPath(); ctx.arc(-10, 6, 13, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(9, -1, 12, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#2e7d32'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-10, -7); ctx.lineTo(0, -22); ctx.lineTo(9, -13); ctx.stroke();
+    ctx.fillStyle = '#ffd9d9';
+    ctx.beginPath(); ctx.arc(-14, 2, 3, 0, TAU); ctx.arc(5, -5, 2.6, 0, TAU); ctx.fill();
+    if (p.fuse > 0 && !icon) {
+      const blink = prefersReduced ? 1 : 0.55 + 0.45 * Math.sin(game.time * 18);
+      ctx.globalAlpha = 0.30 * blink;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 2, 32, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+      const frac = 1 - p.fuse / CHERRY_FUSE;
+      ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(-16, -36, 32, 5, 2); ctx.fill();
+      ctx.fillStyle = '#ffd23f'; rr(-16, -36, 32 * frac, 5, 2); ctx.fill();
+    }
+  } else { // 兜底：理论上不会走到
+    ctx.fillStyle = t.color; rr(-18, -14, 36, 34, 8); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// 植物绘制：按行从上到下画，下面的行自然盖住上面的行，层次更清楚
+function drawPlants() {
+  for (const p of game.plants.slice().sort((a, b) => a.row - b.row)) drawPlant(p);
+}
+function drawPlant(p) {
+  const t = PLANT_TYPES[p.type], cx = p.x, cy = p.y;
+  drawPlantArt(p.type, cx, cy, p, false, 1);
+
+  // 受击白闪（高坚果更高，闪光区加高）
+  if (p.flash > 0) {
+    ctx.globalAlpha = Math.min(1, p.flash * 8) * 0.8;
+    ctx.fillStyle = '#fff';
+    const fh = p.type === 'tallnut' ? 76 : 46;
+    rr(cx - 30, cy - fh / 2, 60, fh, 8); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // 受伤血条
+  if (p.hp < p.maxHp) {
+    const frac = p.hp / p.maxHp;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(cx - 20, cy - 42, 40, 5, 2); ctx.fill();
+    ctx.fillStyle = frac > 0.5 ? '#58c458' : (frac > 0.25 ? '#ffd23f' : '#ff5555');
+    rr(cx - 20, cy - 42, 40 * frac, 5, 2); ctx.fill();
+  }
+  // 名字
+  ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(t.name, cx, cy + 38);
+}
+
+// 小推车绘制：红色小车 + 车斗 + 轮子 + 名字（静止的停在每行最左，冲刺的跟随 c.x）
+function drawCarts() {
+  // 推车已用完的行：左侧画一条红色虚线，提醒这条线已经没有保命机会
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,80,80,0.42)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5]);
+  for (let r = 0; r < ROWS; r++) {
+    if (game.carts[r]) continue;
+    const cy = GRID_TOP + r * CELL_H + CELL_H / 2;
+    ctx.beginPath(); ctx.moveTo(CART_X, cy - 32); ctx.lineTo(CART_X, cy + 32); ctx.stroke();
+  }
+  ctx.restore();
+  for (let r = 0; r < ROWS; r++) {
+    if (!game.carts[r]) continue;
+    // 第一列有植物时，把静止推车缩到最左边，避免和植物叠在一起
+    const occupied = !!plantAt(r, 0);
+    drawCart(occupied ? 8 : CART_X, GRID_TOP + r * CELL_H + CELL_H / 2, occupied);
+  }
+}
+function drawCartsMoving() {
+  for (const c of game.cartsMoving) drawCart(c.x, GRID_TOP + c.row * CELL_H + CELL_H / 2, false);
+}
+function drawCart(x, y, small) {
+  ctx.save();
+  if (small) { ctx.translate(x, y); ctx.scale(0.75, 0.75); ctx.translate(-x, -y); }
+  ctx.fillStyle = '#c0392b'; rr(x - 16, y - 14, 32, 22, 4); ctx.fill();      // 车身
+  ctx.fillStyle = '#f4d03f'; rr(x - 12, y - 10, 24, 6, 2); ctx.fill();      // 车斗
+  ctx.fillStyle = '#555';
+  ctx.beginPath(); ctx.arc(x - 8, y + 14, 5, 0, TAU); ctx.arc(x + 8, y + 14, 5, 0, TAU); ctx.fill();  // 轮子
+  if (!small) {
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.font = '9px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('推车', x, y + 36);
+  }
+  ctx.restore();
+}
+
+// 僵尸绘制：色块身体 + 护甲 / 撑杆 / 名字 / 血条（巨人放大、小鬼缩小）
+// 每行只给最靠前的僵尸画名字，避免尸群叠在一起时名字糊成一团；血条仍然每只都画。
+function drawZombies() {
+  // 按行从上到下绘制：下行的僵尸盖住上行，巨人不会反被前排小鬼压住
+  const list = game.zombies.slice().sort((a, b) => a.row - b.row);
+  const front = new Map();
+  for (const z of list) {
+    if (z.hp <= 0) continue;
+    const cur = front.get(z.row);
+    if (!cur || z.x < cur.x) front.set(z.row, z);
+  }
+  for (const z of list) drawZombie(z, front.get(z.row) === z && z.type !== 'gargantuar');
+}
+function drawZombie(z, showName) {
+  const s = z.type === 'gargantuar' ? 1.85 : (z.type === 'imp' ? 0.7 : 1);
+  ctx.save();
+  ctx.translate(z.x, z.y);          // 坐标系平移到僵尸中心
+  ctx.scale(s, s);
+  const bob = z.eating ? Math.sin(z.bitePhase * 14) * 3 : 0;  // 啃食时脑袋轻晃
+  const hx = 0, hy = bob;
+  const body = z.flash > 0 ? '#ffffff' : z.color;
+  // 腿（走路摆动）
+  const swing = z.eating ? 0 : Math.sin(game.time * 8 + z.x) * 4;
+  ctx.strokeStyle = body; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(hx - 6, hy + 16); ctx.lineTo(hx - 8 + swing, hy + 30); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hx + 6, hy + 16); ctx.lineTo(hx + 8 - swing, hy + 30); ctx.stroke();
+  // 身体
+  ctx.fillStyle = body; rr(hx - 12, hy - 6, 24, 24, 6); ctx.fill();
+  // 前伸的手臂
+  ctx.beginPath(); ctx.moveTo(hx + 8, hy - 2); ctx.lineTo(hx + 20, hy + 4); ctx.stroke();
+  // 头 + 眼睛
+  ctx.fillStyle = body; ctx.beginPath(); ctx.arc(hx, hy - 14, 11, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#3a2b1c';
+  ctx.beginPath(); ctx.arc(hx - 4, hy - 15, 2.5, 0, TAU); ctx.arc(hx + 4, hy - 15, 2.5, 0, TAU); ctx.fill();
+  // 护甲：路障（橙锥）/ 铁桶（灰桶）/ 橄榄球头盔（灰盔带条纹）
+  if (z.helmetHp > 0) {
+    if (z.type === 'cone') {
+      ctx.fillStyle = '#f0a030';
+      ctx.beginPath(); ctx.moveTo(hx - 10, hy - 24); ctx.lineTo(hx, hy - 40); ctx.lineTo(hx + 10, hy - 24); ctx.closePath(); ctx.fill();
+    } else if (z.type === 'bucket') {
+      ctx.fillStyle = '#b9c2cc'; rr(hx - 11, hy - 26, 22, 12, 3); ctx.fill();
+      ctx.fillStyle = '#8f9aa6'; rr(hx - 11, hy - 26, 22, 4, 2); ctx.fill();
+    } else if (z.type === 'football') { // 橄榄球头盔：包住头顶 + 中部条纹
+      ctx.fillStyle = '#9aa7b5';
+      ctx.beginPath(); ctx.arc(hx, hy - 14, 12.5, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#6b7684'; rr(hx - 12, hy - 22, 24, 5, 2); ctx.fill();
+    }
+  }
+  // 铁门（铁门僵尸）：身前一道栅栏门，挡子弹
+  if (z.doorHp > 0) {
+    ctx.fillStyle = '#b9c2cc'; rr(hx - 30, hy - 14, 16, 34, 2); ctx.fill();
+    ctx.strokeStyle = '#8f9aa6'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(hx - 22, hy - 14); ctx.lineTo(hx - 22, hy + 20); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx - 30, hy - 2); ctx.lineTo(hx - 14, hy - 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx - 30, hy + 10); ctx.lineTo(hx - 14, hy + 10); ctx.stroke();
+  }
+  // 报纸（读报僵尸）：纸没碎挡在身前；碎了进入狂暴（红怒线）
+  if (z.paperHp > 0) {
+    ctx.fillStyle = '#efe7d8'; rr(hx - 26, hy - 16, 20, 30, 2); ctx.fill();
+    ctx.strokeStyle = '#b9b0a0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hx - 16, hy - 8); ctx.lineTo(hx - 8, hy - 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx - 16, hy - 1); ctx.lineTo(hx - 8, hy - 1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx - 16, hy + 6); ctx.lineTo(hx - 8, hy + 6); ctx.stroke();
+  } else if (z.type === 'newspaper' && z.enraged) {
+    ctx.strokeStyle = '#ff5555'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hx - 16, hy - 24); ctx.lineTo(hx - 10, hy - 18); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx + 16, hy - 24); ctx.lineTo(hx + 10, hy - 18); ctx.stroke();
+  }
+  // 撑杆（跳过植物后消失）
+  if (z.poleActive) {
+    ctx.strokeStyle = '#c98f4e'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(hx - 16, hy - 22); ctx.quadraticCurveTo(hx + 6, hy - 34, hx + 26, hy + 2); ctx.stroke();
+  }
+  // 红旗（旗帜僵尸）：背上插一面小红旗，提醒大波正在逼近
+  if (z.type === 'flag') {
+    ctx.strokeStyle = '#8a5a2e'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hx + 10, hy - 24); ctx.lineTo(hx + 10, hy - 42); ctx.stroke();
+    ctx.fillStyle = '#e22d2d';
+    ctx.beginPath(); ctx.moveTo(hx + 10, hy - 42); ctx.lineTo(hx + 26, hy - 38); ctx.lineTo(hx + 10, hy - 34); ctx.closePath(); ctx.fill();
+  }
+  // 寒冰减速：浑身罩一层浅蓝色冰霜
+  if (z.slowTimer > 0) {
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = '#8cc8ff';
+    ctx.beginPath(); ctx.arc(hx, hy - 4, 24, 0, TAU); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // 烈焰灼烧：头顶一团橙色小火苗
+  if (z.burnTimer > 0) {
+    ctx.fillStyle = '#ff8c3a';
+    ctx.beginPath(); ctx.moveTo(hx - 7, hy - 30); ctx.quadraticCurveTo(hx, hy - 44, hx + 7, hy - 30);
+    ctx.quadraticCurveTo(hx + 3, hy - 34, hx, hy - 30); ctx.quadraticCurveTo(hx - 3, hy - 34, hx - 7, hy - 30); ctx.fill();
+  }
+  ctx.restore();
+
+  // 血条 / 名字用屏幕坐标绘制：字体不会被巨人放大，且第一行不会画进顶部信息条
+  const big = z.type === 'gargantuar';
+  const nameY = Math.max(z.y - 58, GRID_TOP + 14);
+  // 巨人太高，血条放在自己这一行的头顶上方；名字只靠"巨人僵尸出现了"提示，避免压住相邻行
+  const hpY = big ? Math.max(z.y - 60, GRID_TOP + 6) : Math.max(z.y - 46, GRID_TOP + 6);
+  const barW = big ? 64 : 40;
+  if (z.hp < z.maxHp) {
+    const frac = z.hp / z.maxHp;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; rr(z.x - barW / 2, hpY, barW, 5, 2); ctx.fill();
+    ctx.fillStyle = frac > 0.5 ? '#58c458' : (frac > 0.25 ? '#ffd23f' : '#ff5555');
+    rr(z.x - barW / 2, hpY, barW * frac, 5, 2); ctx.fill();
+  }
+  if (showName) {
+    ctx.font = (big ? 'bold 11px ' : '10px ') + '"Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+    ctx.strokeText(z.name, z.x, nameY);
+    ctx.fillStyle = big ? '#ffd9a8' : 'rgba(255,255,255,0.92)';
+    ctx.fillText(z.name, z.x, nameY);
+  }
+}
+
+// 子弹：豌豆（普通绿 / 冰蓝 / 火橙）、西瓜（绿球 / 冰蓝球 + 条纹）
+function drawProjectiles() {
+  for (const pr of game.projectiles) {
+    if (pr.kind === 'pea' || pr.kind === 'icePea' || pr.kind === 'firePea') {
+      ctx.fillStyle = pr.kind === 'icePea' ? '#7fd0ff' : (pr.kind === 'firePea' ? '#ff8c3a' : '#7ecb3f');
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, pr.kind === 'firePea' ? 7 : 6, 0, TAU); ctx.fill();
+      ctx.fillStyle = pr.kind === 'icePea' ? '#4aa7e8' : (pr.kind === 'firePea' ? '#d85f1a' : '#4c8f2c');
+      ctx.beginPath(); ctx.arc(pr.x - 2, pr.y - 2, 2, 0, TAU); ctx.fill();
+    } else {
+      ctx.fillStyle = pr.kind === 'iceMelon' ? '#6fc6f0' : '#3fae46';
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 13, 0, TAU); ctx.fill();
+      ctx.strokeStyle = pr.kind === 'iceMelon' ? '#dff1ff' : '#dff3c8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 9, -0.8, 0.8); ctx.stroke();
+      ctx.beginPath(); ctx.arc(pr.x, pr.y, 9, 1.8, 3.2); ctx.stroke();
+    }
+  }
+}
+// 阳光：草坪阶段只画未收集的，飞向计数器阶段在 HUD 之后单独画
+function drawSuns(flying) {
+  for (const s of game.suns) {
+    if (flying !== (s.state === 'fly')) continue;
+    const a = s.life < 2 ? Math.max(0, s.life / 2) : 1;  // 快消失时淡出
+    ctx.globalAlpha = clamp(a, 0, 1);
+    drawSunIcon(s.x, s.y, 14);
+    ctx.globalAlpha = 1;
+  }
+}
+// 特效（纯色块：爆炸圈、溅射点、吞噬、死亡收缩等）
+function drawParticles() {
+  for (const pa of game.particles) {
+    const f = pa.age / durationOf(pa.kind);
+    ctx.globalAlpha = 1 - f;
+    if (pa.kind === 'explode') {
+      ctx.fillStyle = '#ffb02e'; ctx.beginPath(); ctx.arc(pa.x, pa.y, 6 + f * 46, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ff6a00'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(pa.x, pa.y, 10 + f * 60, 0, TAU); ctx.stroke();
+    } else if (pa.kind === 'melonSplash') {
+      ctx.fillStyle = '#bfe8c8';
+      for (let i = 0; i < 8; i++) {
+        const a = i / 8 * TAU, d = f * 34;
+        ctx.beginPath(); ctx.arc(pa.x + Math.cos(a) * d, pa.y + Math.sin(a) * d, 3, 0, TAU); ctx.fill();
+      }
+    } else if (pa.kind === 'swallow') {
+      ctx.fillStyle = '#e6484d'; ctx.beginPath(); ctx.arc(pa.x, pa.y, 18 - f * 14, 0, TAU); ctx.fill();
+    } else if (pa.kind === 'zombieDie') {
+      ctx.fillStyle = '#8aa06a'; ctx.beginPath(); ctx.arc(pa.x, pa.y, 16 - f * 12, 0, TAU); ctx.fill();
+    } else if (pa.kind === 'sunPop') { // 阳光入账文字
+      ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 15px "Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('+' + SUN_VALUE, pa.x, pa.y - f * 26);
+      ctx.fillStyle = '#fff';
+      ctx.fillText('+' + SUN_VALUE, pa.x, pa.y - f * 26 - 1);
+    } else { // hit / jump
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath(); ctx.arc(pa.x, pa.y, 10 - f * 8, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// 大波红字警告：居中红色大字 + 波次副标题，轻微脉动
+function drawWarning() {
+  if (!game.warn) return;
+  const a = clamp(Math.min(1, game.warn.ttl * 2), 0, 1);   // 淡入淡出
+  const pulse = prefersReduced ? 1 : 1 + Math.sin(game.time * 10) * 0.04;  // 轻微脉动
+  ctx.globalAlpha = a;
+  ctx.fillStyle = '#ff2d2d';
+  ctx.font = 'bold ' + Math.round(32 * pulse) + 'px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(game.warn.text, W / 2, GRID_TOP + CELL_H * 2 - 10);
+  if (game.warn.sub) {   // 只有大波提示才带副标题（开局保护课本提示只有一行红字）
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '14px "Microsoft YaHei",sans-serif';
+    ctx.fillText(game.warn.sub, W / 2, GRID_TOP + CELL_H * 2 + 34);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// 提示气泡（战斗界面显示在草坪顶部，菜单界面显示在底部空白处）
+function drawToast() {
+  if (!game.toast) return;
+  ctx.font = '14px "Microsoft YaHei",sans-serif';   // 先设字体，measureText 才量得准
+  const tw = ctx.measureText(game.toast.text).width + 30;
+  const y = (game.started && !game.over) ? GRID_TOP + 26 : H - 150;
+  ctx.globalAlpha = clamp(Math.min(1, game.toast.ttl), 0, 1);
+  ctx.fillStyle = 'rgba(0,0,0,0.78)';
+  rr(W / 2 - tw / 2, y, tw, 34, 8); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(game.toast.text, W / 2, y + 17);
+  ctx.globalAlpha = 1;
+}
+
+// 失败瞬间的定格遮罩（随后进入结局短片）
+function drawGameOver() {
+  ctx.fillStyle = 'rgba(20,0,0,0.55)'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = 'rgba(180,20,20,0.16)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ff4a4a'; ctx.font = 'bold 36px "Microsoft YaHei",sans-serif';
+  ctx.fillText('课本被偷走了！', W / 2, GRID_TOP + CELL_H * 2 - 30);
+  ctx.fillStyle = '#ffd23f'; ctx.font = '15px "Microsoft YaHei",sans-serif';
+  ctx.fillText('坚持了 ' + fmtTime(game.time) + ' · 击杀 ' + game.stats.kills + ' 只僵尸', W / 2, GRID_TOP + CELL_H * 2 + 14);
+}
+
+/* 失败结局短片：黑底红字「小屁孩的作业已被偷 已经笑晕在厕所」
+ * 总时长 4 秒：前 3 秒画面静止，最后 1 秒整体渐变消失至黑屏；点击可跳过 */
+function drawFailVideo() {
+  const t = game.failVideo.t;
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  const a = t >= FAIL_VIDEO_TIME - 1 ? 1 - (t - (FAIL_VIDEO_TIME - 1)) : 1;  // 最后 1 秒渐隐
+  ctx.globalAlpha = Math.max(0, a);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e22d2d'; ctx.font = 'bold 46px "Microsoft YaHei",sans-serif';
+  ctx.fillText('小屁孩的课本已被偷', W / 2, H / 2 - 48);
+  ctx.fillText('已经笑晕在厕所', W / 2, H / 2 + 48);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('点击跳过', W / 2, H - 40);
+  ctx.globalAlpha = 1;
+}
+
+/* 结算界面：通关 / 失败统计 + 下一关 / 换阵容 / 返回首页 */
+const RESULT_PRIMARY = { x: W / 2 - 240, y: H - 112, w: 150, h: 52 };
+const RESULT_PICK    = { x: W / 2 - 75,  y: H - 112, w: 150, h: 52 };
+const RESULT_HOME    = { x: W / 2 + 90,  y: H - 112, w: 150, h: 52 };
+function drawResult() {
+  const r = game.result;
+  const canNext = r.win && game.mode === 'level' && game.level < LEVEL_COUNT;
+  ctx.fillStyle = '#1b1e24'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  if (r.win) {
+    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 40px "Microsoft YaHei",sans-serif';
+    ctx.fillText('通关成功！', W / 2, 128);
+    ctx.fillStyle = '#d5dbe3'; ctx.font = '19px "Microsoft YaHei",sans-serif';
+    ctx.fillText(canNext ? ('第 ' + game.level + ' 关已通关，下一关已解锁') : '第 14 关已通关，全部关卡打通！', W / 2, 184);
+  } else {
+    ctx.fillStyle = '#e22d2d'; ctx.font = 'bold 40px "Microsoft YaHei",sans-serif';
+    ctx.fillText('课本被偷走了！', W / 2, 128);
+    ctx.fillStyle = '#d5dbe3'; ctx.font = '18px "Microsoft YaHei",sans-serif';
+    ctx.fillText('僵尸偷走了小屁孩的课本，他笑晕在厕所', W / 2, 184);
+  }
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '15px "Microsoft YaHei",sans-serif';
+  ctx.fillText(fmtTime(r.time) + ' · 打到第 ' + r.wave + ' 波 · 击杀 ' + r.kills + ' 只僵尸', W / 2, 232);
+  ctx.fillStyle = '#7f8794'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('历史最佳：第 ' + game.best.wave + ' 波 · 单局击杀 ' + game.best.kills + ' 只', W / 2, 266);
+  if (game.newRecord) {
+    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 14px "Microsoft YaHei",sans-serif';
+    ctx.fillText('★ 新纪录 ★', W / 2, 294);
+  }
+  // 本局阵容一览
+  ctx.fillStyle = '#7f8794'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('本局阵容', W / 2, 344);
+  const n = game.pickedPlants.length;
+  for (let i = 0; i < n; i++) {
+    const x = W / 2 - (n - 1) * 33 / 2 + i * 33;
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.beginPath(); ctx.arc(x, 390, 15, 0, TAU); ctx.fill();
+    drawPlantIcon(game.pickedPlants[i], x, 390, 0.42);
+  }
+  ctx.fillStyle = '#5f6875'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText(canNext ? '下一关会沿用当前阵容，也可以先换阵容' : '按 R 立即重开本局，或换一套阵容再试', W / 2, 500);
+  drawButton(RESULT_PRIMARY, canNext ? '下一关' : (r.win ? '再玩一次' : '再来一局'), '#4f9a43');
+  drawButton(RESULT_PICK, '换阵容', '#3f6f9a');
+  drawButton(RESULT_HOME, '返回首页', '#5a6472');
+}
+
+/* 暂停界面：遮罩 + 两个开关 + 四个按钮 */
+const PAUSE_AUTO    = { x: W / 2 - 150, y: 202, w: 300, h: 38 };
+const PAUSE_SOUND   = { x: W / 2 - 150, y: 246, w: 300, h: 38 };
+const PAUSE_RESUME  = { x: W / 2 - 150, y: 296, w: 300, h: 44 };
+const PAUSE_RESTART = { x: W / 2 - 150, y: 348, w: 300, h: 44 };
+const PAUSE_PICK    = { x: W / 2 - 150, y: 400, w: 300, h: 44 };
+const PAUSE_HOME    = { x: W / 2 - 150, y: 452, w: 300, h: 44 };
+function drawPaused() {
+  ctx.fillStyle = 'rgba(0,0,0,0.66)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 30px "Microsoft YaHei",sans-serif';
+  ctx.fillText('已暂停', W / 2, 166);
+  drawToggle(PAUSE_AUTO, '自动收集阳光', game.autoSun);
+  drawToggle(PAUSE_SOUND, '音效', game.sound);
+  drawButton(PAUSE_RESUME, '继续游戏', '#4f9a43');
+  drawButton(PAUSE_RESTART, '重新开始', '#e0a817');
+  drawButton(PAUSE_PICK, '重新选植物', '#3f6f9a');
+  drawButton(PAUSE_HOME, '返回首页', '#5a6472');
+  ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('空格继续 · R 重开本局 · 1 / 2 切速度', W / 2, 518);
+}
+
+// 时间格式化：秒 → m:ss
+function fmtTime(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+/* ============================ 7. 输入 ============================ */
+let mouse = { x: -999, y: -999 };
+// 屏幕坐标 → 画布逻辑坐标（画布缩放时也能点准）
+function toCanvas(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+function handleClick(pt) {
+  Sfx.init();                  // 首次手势解锁音频（浏览器要求）
+  if (game.failVideo) {         // 结局短片：点击直接跳过
+    game.failVideo.t = Math.max(game.failVideo.t, FAIL_VIDEO_TIME - 0.02);
+    return;
+  }
+  if (game.result) {           // 结算界面：下一关 / 重开 / 换阵容 / 返回首页
+    const r = game.result;
+    if (inRect(pt, RESULT_PRIMARY)) {
+      if (r.win && game.mode === 'level' && game.level < LEVEL_COUNT) nextLevel();
+      else restartCurrent();
+    } else if (inRect(pt, RESULT_PICK)) backToPick();
+    else if (inRect(pt, RESULT_HOME)) goHome();
+    return;
+  }
+  if (!game.started) {
+    if (game.screen === 'pick') {          // 选卡界面：点植物切换 / 确定出战 / 返回
+      if (inRect(pt, PICK_CONFIRM)) {
+        if (!game.pickedPlants.length) { showToast('至少选 1 种植物'); return; }   // 防止底部栏溢出
+        game.started = true; game.screen = null; game.paused = false;
+        resetGame(); sfx('ui'); return;
+      }
+      if (inRect(pt, PICK_BACK)) { game.screen = game.mode === 'level' ? 'level' : 'diff'; sfx('ui'); return; }
+      for (let i = 0; i < PLANT_ORDER.length; i++) {
+        if (inRect(pt, pickRect(i))) {
+          const type = PLANT_ORDER[i], idx = game.pickedPlants.indexOf(type);
+          if (idx >= 0) game.pickedPlants.splice(idx, 1);        // 再点一次取消
+          else if (game.pickedPlants.length < 10) game.pickedPlants.push(type); // 最多 10 种
+          else showToast('最多选 10 种');
+          sfx('ui');
+          return;
+        }
+      }
+      if (inRect(pt, PICK_PRESET_A)) { applyPreset(PRESET_BEGINNER); sfx('ui'); return; }
+      if (inRect(pt, PICK_PRESET_B)) { applyPreset(PRESET_POWER); sfx('ui'); return; }
+      if (inRect(pt, PICK_CLEAR)) { game.pickedPlants = []; sfx('ui'); return; }
+      return;
+    }
+    if (game.screen === 'diff') {          // 无尽难度 → 选卡界面
+      for (const key of ['easy', 'medium', 'hard']) {
+        if (inRect(pt, DIFF_RECTS[key])) { game.diff = DIFFICULTIES[key]; game.screen = 'pick'; sfx('ui'); return; }
+      }
+      if (inRect(pt, INTRO_BACK)) { game.screen = 'mode'; sfx('ui'); return; }
+      return;
+    }
+    if (game.screen === 'level') {         // 关卡选择：点解锁的关卡 → 选卡（难度按关卡梯度）
+      for (let i = 0; i < LEVEL_COUNT; i++) {
+        if (inRect(pt, levelRect(i))) {
+          if (i + 1 > levelUnlocked()) { showToast('先通关第 ' + i + ' 关！'); return; }
+          game.mode = 'level';
+          game.level = i + 1;
+          game.levelTarget = i + 2;        // 第 n 关目标波数 = n+1
+          game.diff = levelDiff(game.level); // 关卡难度逐关递增
+          game.screen = 'pick';
+          sfx('ui');
+          return;
+        }
+      }
+      if (inRect(pt, INTRO_BACK)) { game.screen = 'mode'; sfx('ui'); return; }
+      return;
+    }
+    if (game.screen === 'mode') {          // 模式选择
+      if (inRect(pt, MODE_LEVEL)) { game.mode = 'level'; game.screen = 'level'; sfx('ui'); return; }
+      if (inRect(pt, MODE_ENDLESS)) { game.mode = 'endless'; game.screen = 'diff'; sfx('ui'); return; }
+      if (inRect(pt, INTRO_BACK)) { game.screen = 'home'; sfx('ui'); return; }
+      return;
+    }
+    if (game.screen === 'intro') {         // 简介
+      if (inRect(pt, INTRO_BACK)) { game.screen = 'home'; sfx('ui'); return; }
+      return;
+    }
+    // 首页
+    if (inRect(pt, HOME_INTRO)) { game.screen = 'intro'; sfx('ui'); return; }
+    if (inRect(pt, HOME_MODE)) { game.screen = 'mode'; sfx('ui'); return; }
+    return;
+  }
+
+  // 暂停菜单：暂停时只有菜单里的东西能点
+  if (game.paused) {
+    if (inRect(pt, PAUSE_RESUME)) { game.paused = false; sfx('ui'); return; }
+    if (inRect(pt, PAUSE_RESTART)) { restartCurrent(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_PICK)) { backToPick(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_HOME)) { goHome(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_AUTO)) { game.autoSun = !game.autoSun; saveSettings(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_SOUND)) { game.sound = !game.sound; if (game.sound) Sfx.init(); saveSettings(); sfx('ui'); return; }
+    return;
+  }
+  if (game.over) { game.overDelay = Math.max(game.overDelay, 1); return; }  // 定格一下，随后进短片
+
+  // 1. 顶部控制按钮（热区外扩 6px，手机上也点得准）
+  if (inRectPad(pt, RECT_PAUSE, 6)) { game.paused = true; sfx('ui'); return; }
+  if (inRectPad(pt, RECT_SPEED, 6)) { game.speed = game.speed === 1 ? 2 : 1; saveSettings(); sfx('ui'); return; }
+  if (inRectPad(pt, RECT_EXIT, 6)) {          // 退出本局 → 回到选卡（保留本关/难度与阵容）
+    backToPick();
+    sfx('ui');
+    return;
+  }
+  // 2. 点阳光 → 收集（飞向顶部计数器入账）
+  for (let i = game.suns.length - 1; i >= 0; i--) {
+    const s = game.suns[i];
+    if (s.state !== 'fly' && dist(pt.x, pt.y, s.x, s.y) <= 30) {
+      s.state = 'fly'; s.tx = SUN_TX; s.ty = SUN_TY;   // 阳光收入动作
+      return;
+    }
+  }
+  // 3. 底部植物卡片（再次点击同一张 = 取消选中）
+  const items = barItems(), CARD_X0 = cardX0(items.length);
+  if (pt.y >= BAR_Y + 4 && pt.y <= H - 4 && pt.x >= CARD_X0) {
+    const idx = Math.floor((pt.x - CARD_X0) / (CARD_W + CARD_GAP));
+    if (idx >= 0 && idx < items.length) {
+      const type = items[idx];
+      if (type !== 'shovel' && (game.cd[type] || 0) > 0) { showToast(PLANT_TYPES[type].name + '冷却中'); return; } // 冷却中的植物不能选中
+      game.selected = (game.selected === type) ? null : type;
+      sfx('ui');
+      return;
+    }
+  }
+  // 4. 草坪种植
+  if (pt.y >= GRID_TOP && pt.y < GRID_TOP + CELL_H * ROWS) {
+    const col = clamp(Math.floor(pt.x / CELL_W), 0, COLS - 1);
+    const row = clamp(Math.floor((pt.y - GRID_TOP) / CELL_H), 0, ROWS - 1);
+    if (!game.selected) return;
+    if (game.selected === 'shovel') { // 铲子：铲除植物，不返还阳光
+      const p = plantAt(row, col);
+      if (p) {
+        game.plants = game.plants.filter(q => q !== p); // 立即移除
+        addParticle(p.x, p.y, 'hit');                    // 铲除小提示
+        game.selected = null;                            // 点一下放一下：铲完自动取消选中
+        sfx('ui');
+      } else showToast('这里没有植物');
+      return;
+    }
+    const t = PLANT_TYPES[game.selected];
+    const cdLeft = game.cd[game.selected] || 0;
+    if (cdLeft > 0) { showToast(t.name + '冷却 ' + cdLeft.toFixed(1) + 's'); return; } // 该植物还没冷却好
+    if (game.sun < t.cost) { showToast('阳光不足！'); return; }
+    if (plantAt(row, col)) { showToast('该格已有植物！'); return; }
+    createPlant(game.selected, row, col);   // 有僵尸的格子也允许种：种下后会被僵尸立刻啃食
+    game.cd[game.selected] = t.cd || PLANT_COOLDOWN; // 该植物按自身冷却进入倒计时，其它植物互不影响
+    game.selected = null;                   // 点一下放一下：种完自动取消选中
+  }
+}
+// 回到选卡界面（保留当前难度/关卡与上次选择，方便快速重开）；对局内 R / 退出走这里
+function backToPick() {
+  saveRunIfNeeded();
+  game.started = false;
+  game.over = false;
+  game.selected = null;
+  game.paused = false;
+  game.failVideo = null;
+  game.overDelay = 0;
+  game.result = null;
+  game.toast = null;
+  game.screen = 'pick';
+}
+// 中途退出 / 重开时把本局成绩记入历史最佳（结算流程已经记过的不重复）
+function saveRunIfNeeded() {
+  if (!game.result && (game.stats.kills > 0 || game.wave > 1)) recordBest();
+}
+// 立即用同一套阵容重开本关 / 本难度
+function restartCurrent() {
+  if (!game.pickedPlants.length) { backToPick(); return; }
+  saveRunIfNeeded();
+  game.started = true;
+  game.screen = null;
+  game.paused = false;
+  game.result = null;
+  game.failVideo = null;
+  resetGame();
+}
+// 结算 → 下一关：沿用本局阵容，进入下一关的选卡
+function nextLevel() {
+  if (game.level >= LEVEL_COUNT) { restartCurrent(); return; }
+  game.level++;
+  game.levelTarget = game.level + 1;
+  game.diff = levelDiff(game.level);
+  backToPick();
+  sfx('ui');
+}
+// 结算 / 任意处 → 回首页
+function goHome() {
+  saveRunIfNeeded();
+  if (updateAvailable) { refreshToLatest(); return; }
+  game.started = false;
+  game.over = false;
+  game.selected = null;
+  game.paused = false;
+  game.failVideo = null;
+  game.overDelay = 0;
+  game.result = null;
+  game.toast = null;
+  game.screen = 'home';
+  game.pickedPlants = [];
+}
+function showToast(text) { game.toast = { text, ttl: 1.4 }; }
+
+canvas.addEventListener('mousemove', e => { mouse = toCanvas(e); });
+canvas.addEventListener('mousedown', e => { handleClick(toCanvas(e)); });
+canvas.addEventListener('contextmenu', e => { e.preventDefault(); game.selected = null; }); // 右键取消选择
+canvas.addEventListener('touchstart', e => {  // 触摸设备等价点击
+  e.preventDefault();
+  const t = e.touches[0];
+  const pt = toCanvas(t);
+  mouse = pt;                                 // 触摸没有 hover，用落点当预览位置
+  handleClick(pt);
+}, { passive: false });
+window.addEventListener('keydown', e => {   // 空格暂停 / 1、2 切速度 / R 重开 / Esc 取消
+  if (e.key === ' ') {
+    if (game.started && !game.over && !game.result && !game.failVideo) {
+      game.paused = !game.paused;
+      e.preventDefault();
+    }
+    return;
+  }
+  if (e.key === '1') { game.speed = 1; saveSettings(); return; }
+  if (e.key === '2') { game.speed = 2; saveSettings(); return; }
+  if (e.key === 'r' || e.key === 'R') {
+    if (game.failVideo) return;
+    if (game.result) {
+      const r = game.result;
+      if (r.win && game.mode === 'level' && game.level < LEVEL_COUNT) nextLevel();
+      else restartCurrent();
+      return;
+    }
+    if (game.started) restartCurrent();
+    else if (game.screen !== 'home') goHome();
+  }
+  if (e.key === 'Escape') {
+    if (game.paused) game.paused = false;
+    else game.selected = null;
+  }
+});
+// 切到后台自动暂停，避免回来时已经被僵尸偷家
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (game.started && !game.over && !game.result && !game.failVideo && !game.paused) game.paused = true;
+  } else {
+    checkForUpdate(false);   // 回到页面时顺便看看有没有新版本
+  }
+});
+window.addEventListener('pagehide', saveRunIfNeeded);   // 关标签页前也把本局纪录存下
+
+/* ============================ 8. 重置与主循环 ============================ */
+function resetGame() {
+  game.time = 0; game.sun = 50; game.selected = null; game.over = false; game.paused = false;
+  game.plants.length = 0; game.zombies.length = 0; game.projectiles.length = 0;
+  game.suns.length = 0; game.particles.length = 0;
+  game.spawnTimer = game.diff.first; game.skySunTimer = game.diff.skyMin; game.cd = {}; game.toast = null; game.stats.kills = 0;
+  game.wave = 1; game.waveTotal = smallWaveSize(1); game.waveLeft = smallWaveSize(1); game.waveKilled = 0; game.waveTimer = 0; game.waveGap = 0;
+  game.bigPending = false; game.bigTimer = 0; game.bigCount = 0; game.lastGargWarn = -99;
+  game.carts = [true, true, true, true, true];   // 每行最左 1 台小推车，开局 5 台齐全
+  game.cartsMoving = [];                         // 正在冲刺的推车（触发后永久消失，本关不复原）
+  game.iceTracks = [];                           // 清空冰道
+  game.failVideo = null; game.overDelay = 0; game.result = null; game.newRecord = false; // 清结局短片 / 结算 / 纪录标记
+  game.warn = { text: '请保护我方小屁孩课本', ttl: 2.5 };   // 开战红字提示（一行，无副标题）
+}
+
+// 统一游戏循环：requestAnimationFrame 驱动，dt 防跳变；2 倍速 = 同一帧跑两次 update（避免大步穿透）
+let last = performance.now();
+function frame(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;   // 切后台回来 dt 过大会导致瞬间穿帮，做上限保护
+  const running = game.started && !game.over && !game.result && !game.failVideo && !game.paused;
+  if (running) for (let i = 0; i < game.speed; i++) update(dt);
+  // 提示气泡统一在这里计时（菜单界面也能正常消失）
+  if (game.toast) { game.toast.ttl -= dt; if (game.toast.ttl <= 0) game.toast = null; }
+  // 失败瞬间：先定格 1 秒让玩家看清"课本被偷"，再播结局短片（黑底红字 4 秒）
+  if (game.started && game.over && !game.failVideo && !game.result) {
+    game.overDelay += dt;
+    if (game.overDelay >= 1.0) game.failVideo = { t: 0 };
+  }
+  if (game.failVideo) {
+    game.failVideo.t += dt;
+    if (game.failVideo.t >= FAIL_VIDEO_TIME) {
+      game.failVideo = null;
+      recordBest();
+      sfx('lose');
+      game.result = { win: false, wave: game.wave, time: game.time, kills: game.stats.kills };
+    }
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+loadBest();       // 读历史最佳
+loadSettings();   // 读音效 / 自动收阳光 / 倍速设置
+resetGame();      // 初始化一局（未开始）
+requestAnimationFrame(frame);
+if (IS_HOSTED) {
+  setTimeout(() => checkForUpdate(true), 4000);
+  setInterval(() => checkForUpdate(false), 300000);
+}
+</script>
+</body>
+</html>
