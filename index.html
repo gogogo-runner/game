@@ -423,6 +423,40 @@ const ZOMBIE_TYPES = {
   imp:        { name: '小鬼僵尸',   bodyHp: 200,  helmetHp: 0,    speedMul: 2.2,  pole: false, color: '#c9b27a' } // 巨人抛出的小鬼：血少跑得快
 };
 const NEWSPAPER_RAGE = 2.6;   // 读报僵尸报纸碎裂后的狂暴速度倍数
+
+/* ============================ 3.5 图鉴数据 ============================ */
+const ZOMBIE_ORDER = ['normal', 'cone', 'pole', 'bucket', 'flag', 'newspaper', 'screendoor', 'football', 'imp', 'gargantuar'];
+// 植物图鉴：基础数值直接读 PLANT_TYPES，这里补充分类和实战技巧
+const PLANT_CODEX = {
+  sunflower:   { role: '经济', tip: '越早种越赚。前两列优先铺向日葵，阳光多了再补输出。' },
+  peashooter:  { role: '输出', tip: '最稳的基础输出，每行至少铺 1～2 个，别让某一行完全空着。' },
+  repeater:    { role: '输出', tip: '单行火力翻倍，适合补强僵尸压力最大的那一行。' },
+  wallnut:     { role: '防御', tip: '撑杆跳跳不过去；但巨人僵尸会直接把它砸扁。' },
+  tallnut:     { role: '防御', tip: '8000 血更耐啃，同样能挡住撑杆跳，适合拖住铁桶和橄榄球。' },
+  potatomine:  { role: '一次性', tip: '17.5 秒预热；撑杆跳会跳过它。放在僵尸必经之路上。' },
+  chomper:     { role: '单体控制', tip: '能吞掉非巨人僵尸；咀嚼 42 秒，期间很容易被啃，前面最好有坚果。' },
+  melonpult:   { role: '范围输出', tip: '80 直伤 + 40 溅射，成堆小僵尸的克星。' },
+  snowpea:     { role: '控制输出', tip: '减速 10 秒，落点冰道还能继续减速；适合拖住铁桶/橄榄球。' },
+  wintermelon: { role: '范围控制', tip: '范围减速，后期控场很强；400 阳光偏贵，先有经济再种。' },
+  squash:      { role: '一次性', tip: '前后 1.5 格都能砸；非巨人必杀，巨人只掉 1800。' },
+  jalapeno:    { role: '一次性', tip: '烧穿整行，非巨人必杀并清冰道；不要浪费在单只普通僵尸上。' },
+  firepea:     { role: '输出', tip: '40 直伤 + 13 溅射 + 3 秒灼烧，打护甲也稳。' },
+  cherrybomb:  { role: '一次性', tip: '九宫格非巨人必杀；大波僵尸挤在一起时收益最高。' }
+};
+// 僵尸图鉴：hp 为基础值（实际会随关卡/无尽时间放大）
+const ZOMBIE_CODEX = {
+  normal:     { hp: '200', speed: '1.0×', first: '第 1 波', threat: '★', detail: '最普通的僵尸，没有护甲，也没有特殊能力。', tip: '任意输出都能处理；别让某一行完全没有防御。' },
+  cone:       { hp: '320（护甲 120 + 本体 200）', speed: '1.0×', first: '约 35 秒后 / 第 2 波起', threat: '★★', detail: '头戴路障，护甲会先吸收伤害。', tip: '豌豆集火即可；爆炸、火焰和西瓜溅射更快。' },
+  pole:       { hp: '340', speed: '撑杆状态约 2×，落地后 1.0×', first: '约 70 秒后 / 第 3 波起', threat: '★★', detail: '会跳过第一个非坚果植物，落地后变成普通速度；土豆地雷也会被跳过。', tip: '用坚果/高坚果挡住，或在起跳前集中火力。' },
+  bucket:     { hp: '1370（护甲 1170 + 本体 200）', speed: '1.0×', first: '约 120 秒后 / 第 4 波起', threat: '★★★', detail: '铁桶护甲非常厚，能扛大量豌豆。', tip: '西瓜/烈焰/爆炸更有效；寒冰减速可以拖时间。' },
+  flag:       { hp: '200', speed: '1.0×', first: '第 6 / 10 / 14… 波旗帜大波', threat: '★', detail: '旗帜大波的带头僵尸，背红旗，本身和普通僵尸一样。', tip: '优先点掉可以少一个麻烦；但别忽略后面的大部队。' },
+  newspaper:  { hp: '370（报纸 170 + 本体 200）', speed: '0.55×，碎报后 2.6×', first: '第 4 波起', threat: '★★', detail: '报纸没碎时走得很慢；报纸打碎后会暴怒加速。', tip: '要么快速打碎，要么用坚果拖住；别只打一半。' },
+  screendoor: { hp: '1225（铁门 1025 + 本体 200）', speed: '1.0×', first: '第 6 波起', threat: '★★★', detail: '铁门能挡子弹，但挡不住爆炸伤害。', tip: '樱桃/辣椒/地雷/倭瓜直接处理；西瓜直伤会被门挡。' },
+  football:   { hp: '1550（头盔 1350 + 本体 200）', speed: '1.8×', first: '第 7 波起', threat: '★★★', detail: '高速 + 高护甲，冲线非常快，容易漏。', tip: '寒冰减速 + 坚果；用爆炸或火焰破甲。' },
+  imp:        { hp: '200', speed: '2.2×', first: '巨人半血时抛出', threat: '★★', detail: '血少但跑得飞快，被巨人扔到前排。', tip: '范围伤害/冰道招呼；优先点掉，别让它摸到后排。' },
+  gargantuar: { hp: '3000', speed: '0.45×', first: '第 8 波起；第 14 关最终波固定', threat: '★★★★★', detail: '巨人僵尸，会直接砸扁植物；血量降到一半会抛出小鬼。', tip: '一次性植物只造成 1800；用坚果拖住，配合多组输出和爆炸慢慢磨。' }
+};
+const codex = { tab: 'plant', plant: 'sunflower', zombie: 'normal', return: 'home' };
 // 创建僵尸：x 从画布右侧外进入；总血量 = 门/纸/护甲 + 本体，并按难度血量倍率 × 无尽时间倍率缩放
 function createZombie(type, row) {
   const t = ZOMBIE_TYPES[type];
@@ -1035,6 +1069,7 @@ function updateParticles(dt) {
 function draw() {
   if (game.failVideo) { drawFailVideo(); return; }         // 失败结局短片（4s）
   if (game.result) { drawResult(); return; }               // 结算界面
+  if (game.screen === 'codex') { drawCodex(); if (game.toast) drawToast(); return; }  // 图鉴（可从首页或暂停进入）
   if (!game.started) {                                     // 非战斗界面
     if (game.screen === 'pick') drawPick();
     else if (game.screen === 'diff') drawDiff();
@@ -1125,9 +1160,10 @@ function winLevel() {
   game.result = { win: true, wave: game.wave, time: game.time, kills: game.stats.kills };
 }
 
-/* ---------- 首页：游戏简介 / 模式选择 ---------- */
-const HOME_INTRO = { x: W / 2 - 140, y: 292, w: 280, h: 56 };
-const HOME_MODE  = { x: W / 2 - 140, y: 368, w: 280, h: 56 };
+/* ---------- 首页：游戏简介 / 模式选择 / 图鉴 ---------- */
+const HOME_INTRO = { x: 46,  y: 300, w: 200, h: 56 };
+const HOME_MODE  = { x: 260, y: 300, w: 200, h: 56 };
+const HOME_CODEX = { x: 474, y: 300, w: 200, h: 56 };
 function drawHome() {
   if (updateAvailable) {
     ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
@@ -1154,6 +1190,7 @@ function drawHome() {
   ctx.fillText(hasBest ? ('第 ' + game.best.wave + ' 波 ｜ 单局击杀 ' + game.best.kills + ' 只') : '还没有记录，先去打一局吧', W / 2, 240);
   drawButton(HOME_INTRO, '游戏简介', '#4f9a43');
   drawButton(HOME_MODE, '模式选择', '#e0a817');
+  drawButton(HOME_CODEX, '植物 / 僵尸图鉴', '#3f6f9a');
   drawHomeScene();
 }
 // 首页底部小剧场：草坪、植物、课本和一只想来"借"书的僵尸
@@ -1222,6 +1259,184 @@ function drawIntro() {
   ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 16px "Microsoft YaHei",sans-serif';
   ctx.fillText('—— 僵尸上学计划，正式启动 ——', W / 2, 596);
   drawButton(INTRO_BACK, '返回', '#5a6472');
+}
+
+/* ---------- 植物 / 僵尸图鉴 ---------- */
+const CODEX_TAB_PLANT  = { x: W / 2 - 190, y: 68, w: 180, h: 36 };
+const CODEX_TAB_ZOMBIE = { x: W / 2 + 10,  y: 68, w: 180, h: 36 };
+const CODEX_PANEL = { x: 35, y: 312, w: 650, h: 296 };
+const CODEX_PLANT_GRID  = { x0: 27, y0: 120, w: 90, h: 74, gap: 6, cols: 7 };
+const CODEX_ZOMBIE_GRID = { x0: 20, y0: 120, w: 128, h: 82, gap: 10, cols: 5 };
+function codexPlantRect(i) {
+  const c = i % CODEX_PLANT_GRID.cols, r = Math.floor(i / CODEX_PLANT_GRID.cols);
+  return { x: CODEX_PLANT_GRID.x0 + c * (CODEX_PLANT_GRID.w + CODEX_PLANT_GRID.gap), y: CODEX_PLANT_GRID.y0 + r * (CODEX_PLANT_GRID.h + CODEX_PLANT_GRID.gap), w: CODEX_PLANT_GRID.w, h: CODEX_PLANT_GRID.h };
+}
+function codexZombieRect(i) {
+  const c = i % CODEX_ZOMBIE_GRID.cols, r = Math.floor(i / CODEX_ZOMBIE_GRID.cols);
+  return { x: CODEX_ZOMBIE_GRID.x0 + c * (CODEX_ZOMBIE_GRID.w + CODEX_ZOMBIE_GRID.gap), y: CODEX_ZOMBIE_GRID.y0 + r * (CODEX_ZOMBIE_GRID.h + CODEX_ZOMBIE_GRID.gap), w: CODEX_ZOMBIE_GRID.w, h: CODEX_ZOMBIE_GRID.h };
+}
+function openCodex(from) {
+  codex.return = from || 'home';
+  game.screen = 'codex';
+  game.selected = null;
+  if (codex.return === 'pause') game.paused = true;
+  else game.started = false;
+  sfx('ui');
+}
+function closeCodex() {
+  if (codex.return === 'pause') { game.screen = null; game.paused = true; }
+  else { game.screen = 'home'; game.started = false; }
+  sfx('ui');
+}
+function drawZombieIcon(type, cx, cy, scale) {
+  const t = ZOMBIE_TYPES[type];
+  const demo = {
+    type, x: 0, y: 0, hp: 1, maxHp: 1, color: t.color, name: '',
+    eating: false, bitePhase: 0, flash: 0,
+    helmetHp: t.helmetHp, doorHp: t.doorHp || 0, paperHp: t.paperHp || 0,
+    poleActive: !!t.pole, slowTimer: 0, burnTimer: 0, garg: !!t.garg
+  };
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  drawZombie(demo, false);
+  ctx.restore();
+}
+// 简单文本换行：按字符宽度切，适合中文说明
+function wrapText(text, x, y, maxWidth, lineHeight, maxLines) {
+  const lines = [];
+  let line = '';
+  for (const ch of text) {
+    const test = line + ch;
+    if (line && ctx.measureText(test).width > maxWidth) {
+      lines.push(line);
+      line = ch;
+      if (lines.length >= maxLines) break;
+    } else line = test;
+  }
+  if (line && lines.length < maxLines) lines.push(line);
+  lines.forEach((txt, i) => ctx.fillText(txt, x, y + i * lineHeight));
+}
+function drawCodexTab(rect, label, active) {
+  const hover = inRect(mouse, rect);
+  ctx.fillStyle = active ? '#4f9a43' : (hover ? '#3d4452' : '#343a45');
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.fill();
+  ctx.strokeStyle = active ? '#ffd23f' : (hover ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.22)');
+  ctx.lineWidth = active ? 2.5 : 1.5;
+  rr(rect.x, rect.y, rect.w, rect.h, 8); ctx.stroke();
+  ctx.fillStyle = active ? '#fff' : '#c8d0da';
+  ctx.font = 'bold 15px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(label, rect.x + rect.w / 2, rect.y + rect.h / 2 + 1);
+}
+function drawCodexPlantCard(type, i) {
+  const r = codexPlantRect(i), t = PLANT_TYPES[type];
+  const selected = codex.plant === type, hover = inRect(mouse, r);
+  ctx.fillStyle = selected ? '#4a5568' : (hover ? '#3d4452' : '#343a45');
+  rr(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.strokeStyle = selected ? '#ffd23f' : (hover ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.18)');
+  ctx.lineWidth = selected ? 2.5 : 1;
+  rr(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  const cx = r.x + r.w / 2;
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  ctx.beginPath(); ctx.arc(cx, r.y + 25, 18, 0, TAU); ctx.fill();
+  drawPlantIcon(type, cx, r.y + 26, 0.42);
+  ctx.fillStyle = '#e8e8e8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(t.name, cx, r.y + 49);
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 10px "Microsoft YaHei",sans-serif';
+  ctx.beginPath(); ctx.arc(cx - 12, r.y + 65, 4, 0, TAU); ctx.fill();
+  ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
+  ctx.fillText(String(t.cost), cx - 4, r.y + 66);
+}
+function drawCodexZombieCard(type, i) {
+  const r = codexZombieRect(i), t = ZOMBIE_TYPES[type];
+  const selected = codex.zombie === type, hover = inRect(mouse, r);
+  ctx.fillStyle = selected ? '#4a5568' : (hover ? '#3d4452' : '#343a45');
+  rr(r.x, r.y, r.w, r.h, 8); ctx.fill();
+  ctx.strokeStyle = selected ? '#ffd23f' : (hover ? 'rgba(255,255,255,0.72)' : 'rgba(255,255,255,0.18)');
+  ctx.lineWidth = selected ? 2.5 : 1;
+  rr(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+  const cx = r.x + r.w / 2;
+  const iconScale = type === 'gargantuar' ? 0.46 : (type === 'imp' ? 1.05 : 0.92);
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  ctx.beginPath(); ctx.arc(cx, r.y + 27, 22, 0, TAU); ctx.fill();
+  drawZombieIcon(type, cx, r.y + 30, iconScale);
+  ctx.fillStyle = '#e8e8e8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(t.name, cx, r.y + 58);
+  const baseHp = t.bodyHp + t.helmetHp + (t.doorHp || 0) + (t.paperHp || 0);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '10px "Microsoft YaHei",sans-serif';
+  ctx.fillText('血 ' + baseHp, cx, r.y + 73);
+}
+function drawCodexPlantDetail() {
+  const type = codex.plant, t = PLANT_TYPES[type], info = PLANT_CODEX[type];
+  drawPlantIcon(type, 128, 468, 1.32);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 23px "Microsoft YaHei",sans-serif';
+  ctx.fillText(t.name, 218, 344);
+  // 分类小标签
+  ctx.font = 'bold 12px "Microsoft YaHei",sans-serif';
+  const roleW = ctx.measureText(info.role).width + 24;
+  ctx.fillStyle = 'rgba(79,154,67,0.35)'; rr(218, 360, roleW, 22, 6); ctx.fill();
+  ctx.strokeStyle = 'rgba(127,208,122,0.6)'; ctx.lineWidth = 1; rr(218, 360, roleW, 22, 6); ctx.stroke();
+  ctx.fillStyle = '#b6e8b0'; ctx.textAlign = 'center'; ctx.fillText(info.role, 218 + roleW / 2, 371);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#c8d0da'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('阳光 ' + t.cost + '  ｜  血量 ' + t.hp + '  ｜  种植冷却 ' + (t.cd || PLANT_COOLDOWN) + ' 秒', 218, 398);
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('说明', 218, 430);
+  ctx.fillStyle = '#d5dbe3'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  wrapText(t.desc, 218, 452, 435, 20, 2);
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('实战技巧', 218, 510);
+  ctx.fillStyle = '#d5dbe3'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  wrapText(info.tip, 218, 532, 435, 20, 2);
+}
+function drawCodexZombieDetail() {
+  const type = codex.zombie, t = ZOMBIE_TYPES[type], info = ZOMBIE_CODEX[type];
+  const iconScale = type === 'gargantuar' ? 0.62 : (type === 'imp' ? 1.35 : 1.2);
+  drawZombieIcon(type, 126, 476, iconScale);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 23px "Microsoft YaHei",sans-serif';
+  ctx.fillText(t.name, 218, 344);
+  ctx.fillStyle = '#ffb02e'; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('威胁 ' + info.threat, 218, 371);
+  ctx.fillStyle = '#c8d0da'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('基础血量：' + info.hp, 218, 398);
+  ctx.fillText('移速：' + info.speed, 218, 422);
+  ctx.fillText('首次出现：' + info.first, 218, 446);
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('说明', 218, 476);
+  ctx.fillStyle = '#d5dbe3'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  wrapText(info.detail, 218, 498, 435, 20, 2);
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.fillText('应对技巧', 218, 550);
+  ctx.fillStyle = '#d5dbe3'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  wrapText(info.tip, 218, 572, 435, 20, 2);
+}
+function drawCodex() {
+  ctx.fillStyle = '#1b1e24'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 24px "Microsoft YaHei",sans-serif';
+  ctx.fillText('植物 / 僵尸图鉴', W / 2, 36);
+  drawCodexTab(CODEX_TAB_PLANT, '植物 ' + PLANT_ORDER.length, codex.tab === 'plant');
+  drawCodexTab(CODEX_TAB_ZOMBIE, '僵尸 ' + ZOMBIE_ORDER.length, codex.tab === 'zombie');
+  if (codex.tab === 'plant') {
+    for (let i = 0; i < PLANT_ORDER.length; i++) drawCodexPlantCard(PLANT_ORDER[i], i);
+  } else {
+    for (let i = 0; i < ZOMBIE_ORDER.length; i++) drawCodexZombieCard(ZOMBIE_ORDER[i], i);
+  }
+  // 详情面板
+  const p = CODEX_PANEL;
+  ctx.fillStyle = 'rgba(255,255,255,0.045)'; rr(p.x, p.y, p.w, p.h, 12); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; rr(p.x, p.y, p.w, p.h, 12); ctx.stroke();
+  if (codex.tab === 'plant') drawCodexPlantDetail();
+  else drawCodexZombieDetail();
+  drawButton(INTRO_BACK, '返回', '#5a6472');
+  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText((codex.return === 'pause' ? 'Esc 返回暂停' : 'Esc 返回首页') + '  ·  点击卡片查看详细信息', W / 2, 640);
 }
 
 /* ---------- 模式选择：关卡模式 / 无尽模式 ---------- */
@@ -2179,6 +2394,7 @@ const PAUSE_RESUME  = { x: W / 2 - 150, y: 296, w: 300, h: 44 };
 const PAUSE_RESTART = { x: W / 2 - 150, y: 348, w: 300, h: 44 };
 const PAUSE_PICK    = { x: W / 2 - 150, y: 400, w: 300, h: 44 };
 const PAUSE_HOME    = { x: W / 2 - 150, y: 452, w: 300, h: 44 };
+const PAUSE_CODEX   = { x: W / 2 - 150, y: 500, w: 300, h: 38 };
 function drawPaused() {
   ctx.fillStyle = 'rgba(0,0,0,0.66)'; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -2190,8 +2406,9 @@ function drawPaused() {
   drawButton(PAUSE_RESTART, '重新开始', '#e0a817');
   drawButton(PAUSE_PICK, '重新选植物', '#3f6f9a');
   drawButton(PAUSE_HOME, '返回首页', '#5a6472');
+  drawButton(PAUSE_CODEX, '植物 / 僵尸图鉴', '#3f6f9a');
   ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-  ctx.fillText('空格继续 · R 重开本局 · 1 / 2 切速度', W / 2, 518);
+  ctx.fillText('空格继续 · R 重开本局 · 1 / 2 切速度 · G 图鉴', W / 2, 548);
 }
 
 // 时间格式化：秒 → m:ss
@@ -2205,6 +2422,20 @@ let mouse = { x: -999, y: -999 };
 function toCanvas(e) {
   const r = canvas.getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+function handleCodexClick(pt) {
+  if (inRect(pt, INTRO_BACK)) { closeCodex(); return; }
+  if (inRect(pt, CODEX_TAB_PLANT)) { codex.tab = 'plant'; sfx('ui'); return; }
+  if (inRect(pt, CODEX_TAB_ZOMBIE)) { codex.tab = 'zombie'; sfx('ui'); return; }
+  if (codex.tab === 'plant') {
+    for (let i = 0; i < PLANT_ORDER.length; i++) {
+      if (inRect(pt, codexPlantRect(i))) { codex.plant = PLANT_ORDER[i]; sfx('ui'); return; }
+    }
+  } else {
+    for (let i = 0; i < ZOMBIE_ORDER.length; i++) {
+      if (inRect(pt, codexZombieRect(i))) { codex.zombie = ZOMBIE_ORDER[i]; sfx('ui'); return; }
+    }
+  }
 }
 function handleClick(pt) {
   Sfx.init();                  // 首次手势解锁音频（浏览器要求）
@@ -2221,6 +2452,7 @@ function handleClick(pt) {
     else if (inRect(pt, RESULT_HOME)) goHome();
     return;
   }
+  if (game.screen === 'codex') { handleCodexClick(pt); return; }
   if (!game.started) {
     if (game.screen === 'pick') {          // 选卡界面：点植物切换 / 确定出战 / 返回
       if (inRect(pt, PICK_CONFIRM)) {
@@ -2280,6 +2512,7 @@ function handleClick(pt) {
     // 首页
     if (inRect(pt, HOME_INTRO)) { game.screen = 'intro'; sfx('ui'); return; }
     if (inRect(pt, HOME_MODE)) { game.screen = 'mode'; sfx('ui'); return; }
+    if (inRect(pt, HOME_CODEX)) { openCodex('home'); return; }
     return;
   }
 
@@ -2289,6 +2522,7 @@ function handleClick(pt) {
     if (inRect(pt, PAUSE_RESTART)) { restartCurrent(); sfx('ui'); return; }
     if (inRect(pt, PAUSE_PICK)) { backToPick(); sfx('ui'); return; }
     if (inRect(pt, PAUSE_HOME)) { goHome(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_CODEX)) { openCodex('pause'); return; }
     if (inRect(pt, PAUSE_AUTO)) { game.autoSun = !game.autoSun; saveSettings(); sfx('ui'); return; }
     if (inRect(pt, PAUSE_SOUND)) { game.sound = !game.sound; if (game.sound) Sfx.init(); saveSettings(); sfx('ui'); return; }
     return;
@@ -2413,6 +2647,14 @@ canvas.addEventListener('touchstart', e => {  // 触摸设备等价点击
   handleClick(pt);
 }, { passive: false });
 window.addEventListener('keydown', e => {   // 空格暂停 / 1、2 切速度 / R 重开 / Esc 取消
+  if (game.screen === 'codex') {
+    if (e.key === 'Escape') { closeCodex(); e.preventDefault(); }
+    return;
+  }
+  if (e.key === 'g' || e.key === 'G') {
+    if (!game.started && game.screen === 'home') { openCodex('home'); e.preventDefault(); return; }
+    if (game.paused) { openCodex('pause'); e.preventDefault(); return; }
+  }
   if (e.key === ' ') {
     if (game.started && !game.over && !game.result && !game.failVideo) {
       game.paused = !game.paused;
