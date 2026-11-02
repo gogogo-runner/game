@@ -2,7 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="screen-orientation" content="landscape">
+<meta name="x5-orientation" content="landscape">
+<meta name="full-screen" content="yes">
+<meta name="x5-fullscreen" content="true">
+<meta name="mobile-web-app-capable" content="yes">
 <title>僵尸想上学</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='7' fill='%2357b84b'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23ffd23f'/%3E%3C/svg%3E">
 <style>
@@ -54,6 +59,87 @@ canvas {
   #wrap { padding: 2px; }
   canvas { max-height: calc(100vh - 8px); width: auto; max-width: 100%; }
 }
+/* ================= 手机横屏引导 =================
+ * 浏览器不能在没有用户手势时强制旋转屏幕；
+ * 竖屏打开时先盖一层提示，按钮里尝试「全屏 + 锁定横屏」，
+ * 不支持方向锁的浏览器（如 iOS Safari）则提示用户手动旋转。 */
+#rotate-tip {
+  display: none;
+  position: fixed; inset: 0; z-index: 9999;
+  align-items: center; justify-content: center;
+  padding: 20px;
+  background: radial-gradient(circle at 50% 35%, #2b3038 0%, #15181d 70%);
+  color: #e8e8e8;
+  text-align: center;
+  touch-action: none;
+}
+#rotate-tip.hidden { display: none !important; }
+.rotate-card {
+  width: min(360px, 90vw);
+  padding: 26px 22px 20px;
+  border-radius: 18px;
+  background: #242931;
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 18px 50px rgba(0,0,0,.55);
+}
+.rotate-phone {
+  width: 42px; height: 72px;
+  margin: 0 auto 18px;
+  border: 3px solid #ffd23f;
+  border-radius: 9px;
+  position: relative;
+  transform: rotate(90deg);
+  animation: rotateHint 2.4s ease-in-out infinite;
+}
+.rotate-phone::before {
+  content: ""; position: absolute; left: 50%; bottom: 5px;
+  width: 12px; height: 2px; border-radius: 2px;
+  background: #ffd23f; transform: translateX(-50%);
+}
+@keyframes rotateHint {
+  0%, 25% { transform: rotate(90deg); }
+  60%, 100% { transform: rotate(0deg); }
+}
+.rotate-title { font-size: 22px; font-weight: 700; color: #ffd23f; margin: 0 0 10px; }
+.rotate-text { font-size: 13px; line-height: 1.7; color: #b8c0ca; margin: 0 0 18px; }
+.rotate-btn {
+  display: block; width: 100%; padding: 12px 14px;
+  border: 0; border-radius: 10px;
+  background: #4f9a43; color: #fff;
+  font: 700 15px/1.2 "Microsoft YaHei", "PingFang SC", sans-serif;
+  cursor: pointer; touch-action: manipulation;
+}
+.rotate-btn:active { transform: translateY(1px); }
+.rotate-sub {
+  display: block; width: 100%; margin-top: 9px; padding: 9px 12px;
+  border: 1px solid rgba(255,255,255,.18); border-radius: 10px;
+  background: transparent; color: #9aa3ad;
+  font: 500 13px/1.2 "Microsoft YaHei", "PingFang SC", sans-serif;
+  cursor: pointer; touch-action: manipulation;
+}
+.rotate-status { min-height: 34px; margin: 12px 0 0; font-size: 11px; line-height: 1.5; color: #7f8794; }
+@media (orientation: portrait) and (max-width: 900px) and (pointer: coarse) {
+  #rotate-tip { display: flex; }
+}
+/* 兼容 pointer 报告不准确的手机浏览器：JS 检测到移动端时加 .rotate-mobile */
+@media (orientation: portrait) and (max-width: 900px) {
+  html.rotate-mobile #rotate-tip { display: flex; }
+}
+@media (orientation: landscape) and (max-height: 520px) {
+  /* 手机横屏：去掉页面标题与说明，画布吃满高度 */
+  html, body { height: 100%; min-height: 100%; overflow: hidden; }
+  #wrap {
+    width: 100vw; height: 100vh; height: 100dvh;
+    padding: 0; display: flex; align-items: center; justify-content: center;
+  }
+  h1, .hint, .credit { display: none; }
+  canvas {
+    height: 100vh; height: 100dvh;
+    width: auto; max-width: 100vw;
+    max-height: 100vh; max-height: 100dvh;
+    border-radius: 0;
+  }
+}
 </style>
 </head>
 <body>
@@ -63,6 +149,67 @@ canvas {
   <p class="hint">选模式 → 挑最多 10 种植物出战 ｜ 点卡片选植物或铲子，点操场种植 / 铲除<br>空格暂停（自动收阳光 / 音效）· 1 / 2 切速度 · I 道具 · R 重开本局 ｜ 保护我方小屁孩课本！</p>
   <p class="credit">七巧出品必出精品</p>
 </div>
+
+<div id="rotate-tip">
+  <div class="rotate-card">
+    <div class="rotate-phone" aria-hidden="true"></div>
+    <h2 class="rotate-title">请横屏游玩</h2>
+    <p class="rotate-text">横屏能把操场、卡槽和僵尸看得更大。<br>点下面的按钮会尝试全屏并锁定横屏。</p>
+    <button class="rotate-btn" id="rotate-start" type="button">横屏全屏开始</button>
+    <button class="rotate-sub" id="rotate-dismiss" type="button">先在竖屏玩</button>
+    <p class="rotate-status" id="rotate-status">如果浏览器不允许自动旋转，请把手机横过来。</p>
+  </div>
+</div>
+
+<script>
+/* 手机横屏引导：优先尝试 fullscreen + screen.orientation.lock；
+ * 不支持方向锁的浏览器只提示用户手动旋转，不会影响游戏本身。 */
+(function () {
+  var tip = document.getElementById('rotate-tip');
+  var start = document.getElementById('rotate-start');
+  var dismiss = document.getElementById('rotate-dismiss');
+  var status = document.getElementById('rotate-status');
+  if (!tip || !start || !dismiss) return;
+  var isMobile = /Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || '')
+    || navigator.maxTouchPoints > 0;
+  if (isMobile) document.documentElement.classList.add('rotate-mobile');
+  var dismissed = false;
+  function hideTip() { tip.classList.add('hidden'); }
+  function landscape() { return window.innerWidth > window.innerHeight; }
+  function showStatus(text) { if (status) status.textContent = text; }
+
+  dismiss.addEventListener('click', function () {
+    dismissed = true;
+    hideTip();
+  });
+
+  start.addEventListener('click', async function () {
+    var root = document.documentElement;
+    showStatus('正在尝试全屏并锁定横屏…');
+    try {
+      if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
+      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+    } catch (e) { /* 某些手机浏览器禁止元素全屏 */ }
+    try {
+      if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
+    } catch (e) { /* iOS Safari 等不支持方向锁 */ }
+    setTimeout(function () {
+      if (landscape()) {
+        hideTip();
+      } else {
+        showStatus('浏览器没有允许自动旋转：请把手机横过来，页面会自动适配横屏。');
+      }
+    }, 450);
+  });
+
+  window.addEventListener('orientationchange', function () {
+    if (landscape() && !dismissed) hideTip();
+  });
+  window.addEventListener('resize', function () {
+    if (landscape()) hideTip();
+  });
+})();
+</script>
 
 <script>
 "use strict";
