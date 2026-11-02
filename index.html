@@ -20,7 +20,7 @@ html, body {
   font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
   overscroll-behavior: none;
 }
-#wrap { text-align: center; padding: 12px; }
+#wrap { text-align: center; padding: 12px; position: relative; z-index: 1; }
 h1 {
   color: #e8e8e8; font-size: 20px; font-weight: 600;
   margin: 0 0 10px 0; letter-spacing: 1px;
@@ -36,6 +36,35 @@ canvas {
   -webkit-user-select: none; user-select: none;
   cursor: pointer;
 }
+/* 横屏时用游戏画面本身的模糊放大版填满左右空白，主画面仍然保持比例、不拉伸 */
+#ambient {
+  display: none;
+  position: fixed; inset: 0; z-index: 0;
+  width: 100vw; height: 100vh; height: 100dvh;
+  max-width: none; max-height: none;
+  margin: 0; padding: 0;
+  border-radius: 0; box-shadow: none;
+  background: #111418;
+  pointer-events: none;
+  filter: blur(16px) brightness(.52) saturate(1.2);
+  transform: scale(1.08);
+  opacity: .9;
+}
+#fs-toggle {
+  display: none;
+  position: fixed; top: max(10px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right));
+  z-index: 3;
+  padding: 7px 12px;
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 8px;
+  background: rgba(20,24,30,.62);
+  color: #e8e8e8;
+  font: 600 12px/1.2 "Microsoft YaHei", "PingFang SC", sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+  backdrop-filter: blur(6px);
+}
+#fs-toggle:active { transform: translateY(1px); }
 .hint { color: #7f8794; font-size: 12px; margin: 10px 0 0 0; line-height: 1.7; }
 .credit { color: #aeb6c0; font-size: 13px; margin: 10px 0 0 0; letter-spacing: 3px; }
 @media (max-width: 560px) {
@@ -133,16 +162,20 @@ canvas {
     padding: 0; display: flex; align-items: center; justify-content: center;
   }
   h1, .hint, .credit { display: none; }
-  canvas {
+  #ambient { display: block; }
+  #fs-toggle { display: block; }
+  #game {
     height: 100vh; height: 100dvh;
     width: auto; max-width: 100vw;
     max-height: 100vh; max-height: 100dvh;
-    border-radius: 0;
+    border-radius: 4px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.10), 0 24px 80px rgba(0,0,0,.72);
   }
 }
 </style>
 </head>
 <body>
+<canvas id="ambient" aria-hidden="true"></canvas>
 <div id="wrap">
   <h1>僵尸想上学</h1>
   <canvas id="game" width="720" height="670" role="img" aria-label="僵尸想上学：5 行 9 列校园操场的植物大战僵尸游戏画面，点击种植植物、收集阳光，守住小屁孩的课本"></canvas>
@@ -157,9 +190,10 @@ canvas {
     <p class="rotate-text">横屏能把操场、卡槽和僵尸看得更大。<br>点下面的按钮会尝试全屏并锁定横屏。</p>
     <button class="rotate-btn" id="rotate-start" type="button">横屏全屏开始</button>
     <button class="rotate-sub" id="rotate-dismiss" type="button">先在竖屏玩</button>
-    <p class="rotate-status" id="rotate-status">如果浏览器不允许自动旋转，请把手机横过来。</p>
+    <p class="rotate-status" id="rotate-status" aria-live="polite">如果浏览器不允许自动旋转，请确认手机没有开启竖屏锁定，再把手机横过来。</p>
   </div>
 </div>
+<button id="fs-toggle" type="button">全屏</button>
 
 <script>
 /* 手机横屏引导：优先尝试 fullscreen + screen.orientation.lock；
@@ -176,32 +210,69 @@ canvas {
   var dismissed = false;
   function hideTip() { tip.classList.add('hidden'); }
   function landscape() { return window.innerWidth > window.innerHeight; }
-  function showStatus(text) { if (status) status.textContent = text; }
+  function showStatus(text, warn) {
+    if (!status) return;
+    status.textContent = text;
+    status.style.color = warn ? '#ffd23f' : '#7f8794';
+  }
 
   dismiss.addEventListener('click', function () {
     dismissed = true;
     hideTip();
   });
 
-  start.addEventListener('click', async function () {
-    var root = document.documentElement;
-    showStatus('正在尝试全屏并锁定横屏…');
+  function tryLockOrientation() {
+    if (landscape()) return;
     try {
-      if (root.requestFullscreen) await root.requestFullscreen({ navigationUI: 'hide' });
-      else if (root.webkitRequestFullscreen) root.webkitRequestFullscreen();
-    } catch (e) { /* 某些手机浏览器禁止元素全屏 */ }
-    try {
-      if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('landscape');
-    } catch (e) { /* iOS Safari 等不支持方向锁 */ }
-    setTimeout(function () {
-      if (landscape()) {
-        hideTip();
-      } else {
-        showStatus('浏览器没有允许自动旋转：请把手机横过来，页面会自动适配横屏。');
+      if (screen.orientation && screen.orientation.lock) {
+        var p = screen.orientation.lock('landscape');
+        if (p && p.catch) p.catch(function () {});
+      } else if (screen.lockOrientation) {
+        screen.lockOrientation('landscape');
+      } else if (screen.mozLockOrientation) {
+        screen.mozLockOrientation('landscape');
+      } else if (screen.msLockOrientation) {
+        screen.msLockOrientation('landscape');
       }
-    }, 450);
+    } catch (e) { /* iOS Safari / 微信内置浏览器通常不支持方向锁 */ }
+  }
+  function requestFullscreenNow() {
+    var root = document.documentElement;
+    try {
+      if (document.fullscreenElement || document.webkitFullscreenElement) return;
+      if (root.requestFullscreen) {
+        var p = root.requestFullscreen();
+        if (p && p.catch) p.catch(function () {});
+      } else if (root.webkitRequestFullscreen) {
+        root.webkitRequestFullscreen();
+      }
+    } catch (e) { /* 部分内置浏览器禁止元素全屏 */ }
+  }
+
+  start.addEventListener('click', function () {
+    showStatus('正在尝试全屏并锁定横屏…');
+    // 不 await 全屏 promise：某些手机浏览器会一直不 resolve，导致后面的方向锁永远不执行。
+    requestFullscreenNow();
+    tryLockOrientation();
+    setTimeout(tryLockOrientation, 200);
+    setTimeout(tryLockOrientation, 600);
+    setTimeout(function () {
+      if (landscape()) { hideTip(); return; }
+      showStatus('当前浏览器没有允许网页自动旋转。请确认手机没有开启竖屏锁定，再手动横屏；横屏后会自动进入游戏，也可以点下面「关闭提示，手动旋转手机」。', true);
+      start.textContent = '再试一次自动横屏';
+      dismiss.textContent = '关闭提示，手动旋转手机';
+    }, 1100);
   });
 
+  // 全屏完成后再次尝试方向锁（有的浏览器必须先进入全屏才允许 lock）
+  document.addEventListener('fullscreenchange', function () {
+    tryLockOrientation();
+    setTimeout(function () { if (landscape()) hideTip(); }, 250);
+  });
+  document.addEventListener('webkitfullscreenchange', function () {
+    tryLockOrientation();
+    setTimeout(function () { if (landscape()) hideTip(); }, 250);
+  });
   window.addEventListener('orientationchange', function () {
     if (landscape() && !dismissed) hideTip();
   });
@@ -4059,6 +4130,62 @@ if (IS_HOSTED) {
   setTimeout(() => checkForUpdate(true), 4000);
   setInterval(() => checkForUpdate(false), 300000);
 }
+</script>
+<script>
+/* 横屏增强：
+ * 1) 用主画面的模糊放大版填满左右空白，避免两条大黑边；
+ * 2) 右上角提供全屏按钮，方便在横屏下进一步隐藏浏览器栏。
+ * 主画面始终等比缩放，不拉伸、不裁切，画质不受影响。 */
+(function () {
+  var amb = document.getElementById('ambient');
+  var main = document.getElementById('game');
+  var fsBtn = document.getElementById('fs-toggle');
+  if (!amb || !main) return;
+  var actx = amb.getContext('2d');
+
+  function fitAmbient() {
+    var w = Math.max(1, Math.round(window.innerWidth / 2));
+    var h = Math.max(1, Math.round(window.innerHeight / 2));
+    if (amb.width !== w || amb.height !== h) { amb.width = w; amb.height = h; }
+  }
+  function paintAmbient() {
+    if (document.hidden || getComputedStyle(amb).display === 'none') return;
+    fitAmbient();
+    var aw = amb.width, ah = amb.height, mw = main.width, mh = main.height;
+    var scale = Math.max(aw / mw, ah / mh);       // cover：保持比例，裁掉少量边缘
+    var sw = Math.min(mw, aw / scale), sh = Math.min(mh, ah / scale);
+    actx.clearRect(0, 0, aw, ah);
+    actx.drawImage(main, (mw - sw) / 2, (mh - sh) / 2, sw, sh, 0, 0, aw, ah);
+  }
+  fitAmbient();
+  window.addEventListener('resize', fitAmbient);
+  setInterval(paintAmbient, 180);
+
+  if (fsBtn) {
+    var root = document.documentElement;
+    if (!root.requestFullscreen && !root.webkitRequestFullscreen) {
+      fsBtn.style.display = 'none';   // 不支持全屏的浏览器直接隐藏按钮
+    } else {
+      var isFs = function () { return document.fullscreenElement || document.webkitFullscreenElement; };
+      var updateFs = function () { fsBtn.textContent = isFs() ? '退出全屏' : '全屏'; };
+      fsBtn.addEventListener('click', function (e) {
+        e.preventDefault(); e.stopPropagation();
+        try {
+          if (isFs()) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          } else {
+            var p = root.requestFullscreen ? root.requestFullscreen() : root.webkitRequestFullscreen();
+            if (p && p.catch) p.catch(function () {});
+          }
+        } catch (err) {}
+      });
+      document.addEventListener('fullscreenchange', updateFs);
+      document.addEventListener('webkitfullscreenchange', updateFs);
+      updateFs();
+    }
+  }
+})();
 </script>
 </body>
 </html>
