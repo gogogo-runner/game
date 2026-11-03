@@ -288,7 +288,7 @@ canvas {
  * 僵尸想上学（单文件实现，无外部资源、无音频文件、无需后端）
  *
  * 故事：僵尸偷不到脑子太丢脸，决定读书长脑子，于是去"借"农夫小孩的课本……
- * 模式：关卡模式（14 关逐关解锁）/ 无尽模式（三档难度）/ 混沌模式（天上掉馅饼）
+ * 模式：关卡模式（14 关逐关解锁）/ 无尽模式（三档难度）/ 混沌模式（天上掉馅饼 + 惊喜天气）
  * 玩法：5 行 × 9 列校园操场（背景为教学楼 + 塑胶跑道 + 教室黑板/课桌）。
  *       僵尸从右侧（第 9 列外）生成、向左走；
  *       普通模式：点击底部植物卡片选中 → 点操场种植；点击阳光 +25；
@@ -299,7 +299,7 @@ canvas {
  * 新系统：全局金币（对局结束清算）/ 良商铺（清屏卡、清除卡）/ 永久卡槽扩容。
  *
  * 核心机制（贴近原版）：
- *   - 向日葵：每 15s 产一个阳光
+ *   - 向日葵：每 15s 产一个阳光；双头向日葵造价150，每 15s 同时产 2 个阳光
  *   - 豌豆射手：同行有僵尸时每 1.4s 一发豌豆（20 伤害）；双发射手一轮连发两颗
  *   - 坚果墙 4000 血；高坚果 8000 血且更高，撑杆跳翻不过去
  *   - 土豆地雷：17.5s 预热，就绪后本行僵尸进入一格即引爆；非巨人必杀，未就绪被啃直接消失
@@ -309,12 +309,14 @@ canvas {
  *   - 倭瓜：前后 1.5 格内最近僵尸跳砸（一次性）；火爆辣椒：1s 引信烧穿整行；
  *     樱桃炸弹：1s 引信炸开九宫格；三种对非巨人必杀，对巨人固定 1800
  *   - 僵尸：普通 200 / 路障 320（护甲 120 + 本体 200）/
- *           铁桶 1370（护甲 1170 + 本体 200）/ 撑杆 340（快，跳第一个
- *           非坚果/非高坚果植物——土豆地雷也会被跳过、不会被引爆——
- *           后变普通僵尸；不能跳坚果墙和高坚果）
+ *           铁桶 1370（护甲 1170 + 本体 200）/ 撑杆 340（快，能跳过普通植物和
+ *           普通坚果——土豆地雷也会被跳过、不会被引爆——但不能跳过高坚果、
+ *           寒冰坚果、寒冰高坚果、火焰坚果、火焰高坚果）
  *   - 新增僵尸：双人结伴（2 只并排 + 伙伴存活时 20% 减伤）/
  *               迟到狂奔（3~5s 或首伤后速度×2）/ 睡眼惺忪（随机打瞌睡，受击惊醒提速）/
  *               僵尸老师（慢速高血，身后召唤最多 5 名普通学生，老师死后停止召唤）
+ *   - 天气专属：雷电老师（2倍血/普通速度/每5秒3次随机3格清植物）/
+ *               滑冰学生（2倍血/2倍速/免疫冰雪天减速）
  *   - 僵尸啃食植物：每秒 100 伤害；植物血量归零消失
  *   - 波次：进度制推进，第 6 波起每 4 波一次旗帜大波（红字提示后 6s 批量刷出）
  *   - 无尽模式：血量与移速随存活时间缓慢上涨，打得越久越硬
@@ -322,6 +324,7 @@ canvas {
  *   - 馅饼模式：无阳光、随机掉植物卡（不含向日葵）、卡槽存实例、永久扩容 3→10；
  *                卡片可点击存槽，也可以拖到操场直接免费种植；卡槽栏自带铲子；
  *                前期加压：首只 6.5s，前 3 波每波 +1，前 90s 刷怪快 18%
+ *   - 惊喜天气：雷暴/沙暴/冰雪/狂风随机降临，每次30秒，结束后随机45~180秒再来且不叠加
  *   - 后期精英群：第 8 波起高等僵尸有 30/40/20/10% 概率成群出现 1/2/3/4 只
  *   - 钱包：金币 + 卡槽上限 + 背包道具统一存 pzxs_wallet；金币结束后才入账
  * ===================================================================== */
@@ -437,8 +440,8 @@ function levelDiff(lv) {
   };
 }
 /* 无尽模式时间压力：血量 7 分钟 +90% 封顶，移速 10 分钟 +25% 封顶（定格在出生那一刻） */
-function endlessRampHp() { return (game.mode === 'endless' || game.mode === 'pie') ? 1 + Math.min(0.9, game.time / 420 * 0.9) : 1; }
-function endlessRampSpeed() { return (game.mode === 'endless' || game.mode === 'pie') ? 1 + Math.min(0.25, game.time / 600 * 0.25) : 1; }
+function endlessRampHp() { return (game.mode === 'endless' || game.mode === 'pie' || game.mode === 'weather') ? 1 + Math.min(0.9, game.time / 420 * 0.9) : 1; }
+function endlessRampSpeed() { return (game.mode === 'endless' || game.mode === 'pie' || game.mode === 'weather') ? 1 + Math.min(0.25, game.time / 600 * 0.25) : 1; }
 
 /* ============================ 1. 全局游戏状态 ============================ */
 const game = {
@@ -472,10 +475,18 @@ const game = {
   pieSelected: null,  // 馅饼模式当前选中的卡槽下标
   pieShovel: false,   // 馅饼模式是否选中铲子
   elitePackDone: false, // 当前波是否已经生成过"高等僵尸群"
+  // ---- 惊喜天气模式 ----
+  weather: null,          // 当前天气 {type,timeLeft,...}；null=无天气
+  weatherCooldown: 0,     // 距下一次天气的秒数（天气之间随机45~180秒）
+  weatherLast: null,      // 上一次天气，尽量不连续重复
+  lightningFx: [],        // 闪电命中特效
+  weatherSnowTimer: 0,    // 冰雪天飘雪计时
+  weatherDustTimer: 0,    // 沙暴粒子计时
   pieCards: [],       // 天上正在掉落的植物卡
   pieDropTimer: 0,    // 下一张卡掉落倒计时
   targeting: false,   // 清除卡：正在等待点选一只僵尸
   itemsReturn: 'battle', // 道具页返回位置：battle / pause
+  rainTray: false,    // 雨滴快捷托盘是否展开
   wave: 1,            // 当前波次
   waveTotal: 0,       // 本波僵尸总数（需全部击杀才算清波）
   waveLeft: 0,        // 本波还未刷出的数量
@@ -594,6 +605,7 @@ function sfx(name) {
 // cd：该植物种植后的独立冷却（秒），原版同系列植物共用一套节奏；desc：选卡界面说明
 const PLANT_TYPES = {
   sunflower:   { name: '向日葵',   cost: 50,  hp: 300,  cd: 5,   color: '#ffce3a', dark: '#e0a817', desc: '每 15 秒产一个阳光，开局越早种越赚' },
+  twinsunflower: { name: '双头向日葵', cost: 150, hp: 300, cd: 5, color: '#ffce3a', dark: '#e0a817', desc: '每 15 秒同时产 2 个阳光，经济翻倍但造价更高' },
   peashooter:  { name: '豌豆射手', cost: 100, hp: 300,  cd: 5,   color: '#57b84b', dark: '#3f8f36', desc: '同行有僵尸时每 1.4 秒射一发豌豆（20 伤害）' },
   repeater:    { name: '双发射手', cost: 200, hp: 300,  cd: 5,   color: '#4aa83f', dark: '#357f31', desc: '一轮连发两颗豌豆，输出直接翻倍（40 伤害）' },
   wallnut:     { name: '坚果墙',   cost: 50,  hp: 4000, cd: 5,   color: '#c9955f', dark: '#a9713f', desc: '4000 血肉盾，撑杆跳僵尸跳不过去' },
@@ -606,10 +618,21 @@ const PLANT_TYPES = {
   squash:      { name: '倭瓜',     cost: 50,  hp: 300,  cd: 30,  color: '#4fae4a', dark: '#357f31', desc: '前后 1.5 格内都能跳砸；非巨人僵尸必杀' },
   jalapeno:    { name: '火爆辣椒', cost: 125, hp: 300,  cd: 50,  color: '#e8362b', dark: '#b01f16', desc: '1 秒引信烧穿整行；非巨人僵尸必杀并清掉冰道' },
   firepea:     { name: '烈焰豌豆', cost: 200, hp: 300,  cd: 35,  color: '#f07c2e', dark: '#c05a18', desc: '40 直伤 + 13 溅射，命中附带 3 秒灼烧' },
-  cherrybomb:  { name: '樱桃炸弹', cost: 150, hp: 300,  cd: 50,  color: '#e23b3b', dark: '#a81f1f', desc: '1 秒引信后炸开九宫格；非巨人僵尸必杀' }
+  cherrybomb:  { name: '樱桃炸弹', cost: 150, hp: 300,  cd: 50,  color: '#e23b3b', dark: '#a81f1f', desc: '1 秒引信后炸开九宫格；非巨人僵尸必杀' },
+  // ---- 以下 7 种只能通过"进阶雨滴"在对局内合成，不进入开局选卡 ----
+  icesunflower: { name: '寒冰向日葵', cost: 175, hp: 300, cd: 5, color: '#8ed7ff', dark: '#4a9bc4', desc: '产阳光；被僵尸啃食时，啃食速度减半' },
+  firesunflower: { name: '火焰向日葵', cost: 175, hp: 300, cd: 5, color: '#ff9a4a', dark: '#c45a18', desc: '产阳光；被僵尸啃食时，每秒对啃食者造成 20 点火焰伤害' },
+  icewallnut:   { name: '寒冰坚果',   cost: 75,  hp: 6000, cd: 5, color: '#a8dff2', dark: '#5b9fb8', desc: '6000 血；啃食减速，撑杆跳无法跳过' },
+  icetallnut:   { name: '寒冰高坚果', cost: 225, hp: 12000, cd: 5, color: '#bfe9f7', dark: '#6baec7', desc: '12000 血；啃食减速，撑杆跳无法跳过' },
+  firewallnut:  { name: '火焰坚果',   cost: 75,  hp: 6000, cd: 5, color: '#e8a06a', dark: '#a85a2a', desc: '6000 血；啃食者每秒受到 10 点火焰伤害，撑杆跳无法跳过' },
+  firetallnut:  { name: '火焰高坚果', cost: 225, hp: 12000, cd: 5, color: '#f0b37a', dark: '#b56a32', desc: '12000 血；啃食者每秒受到 10 点火焰伤害，撑杆跳无法跳过' },
+  firemelon:    { name: '火焰西瓜',   cost: 350, hp: 300, cd: 5, color: '#f07838', dark: '#b84018', desc: '80 直伤 + 40 溅射；命中附带每秒 10 点火焰伤害' }
 };
-const PLANT_ORDER = ['sunflower', 'peashooter', 'repeater', 'wallnut', 'tallnut', 'potatomine', 'chomper',
+const PLANT_ORDER = ['sunflower', 'twinsunflower', 'peashooter', 'repeater', 'wallnut', 'tallnut', 'potatomine', 'chomper',
                      'melonpult', 'snowpea', 'wintermelon', 'squash', 'jalapeno', 'firepea', 'cherrybomb'];
+// 图鉴包含只能由雨滴进阶得到的植物；它们不在 PLANT_ORDER 里，所以不会出现在开局选卡
+const RAIN_ONLY_PLANTS = ['icesunflower', 'firesunflower', 'icewallnut', 'icetallnut', 'firewallnut', 'firetallnut', 'firemelon'];
+const ALL_PLANT_ORDER = PLANT_ORDER.concat(RAIN_ONLY_PLANTS);
 
 /* 各机制数值（与原版贴近） */
 const SUN_VALUE = 25;             // 收集一个阳光 +25
@@ -632,6 +655,12 @@ const CHERRY_DAMAGE = 1800, CHERRY_FUSE = 1.1, CHERRY_RADIUS = CELL_W * 1.45; //
 const MINE_ARM_TIME = 17.5, MINE_DAMAGE = 1800;               // 地雷预热 / 对巨人伤害
 const CHOMER_CHEW = 42;                                       // 食人花咀嚼 CD（秒）
 const ZOMBIE_BITE = 100;                                      // 僵尸啃植物每秒伤害
+// 撑杆跳：可以跳过普通坚果，但不能跳过任何高坚果/寒冰/火焰坚果
+const POLE_BLOCK_TYPES = new Set(['tallnut', 'icewallnut', 'icetallnut', 'firewallnut', 'firetallnut']);
+// 被啃时减速的植物（啃食伤害减半）
+const BITE_SLOW_TYPES = new Set(['icesunflower', 'icewallnut', 'icetallnut']);
+// 被啃时每秒反伤
+const BITE_BURN_TYPES = { firesunflower: 20, firewallnut: 10, firetallnut: 10 };
 const CART_X = 12, CART_SPEED = 700;                          // 小推车：停在每行最左(房屋前)，触发后以 700px/s 向右冲刺
 
 /* 波次与旗帜大波（原版规则）：进度制推进，每 4 波一次大波，红字提示后延迟 7.2s 批量刷僵尸 */
@@ -642,6 +671,14 @@ const BIG_WAVE_DELAY = 6;     // 红字提示 → 延迟 6 秒 → 批量刷僵�
 const BIG_WAVE_BASE = 10;     // 第一次大波的僵尸数量
 const BIG_WAVE_STEP = 2;      // 之后每次大波比上一次多 2 只
 const WAVE_GAP = 2.2;         // 一波结束到下一波开始的喘息时间（秒）
+
+/* 惊喜天气：每次30秒，天气之间随机45~180秒，同一时间只能有一种 */
+const WEATHER_DURATION = 30;
+const WEATHER_MIN_GAP = 45;
+const WEATHER_MAX_GAP = 180;
+const WEATHER_TYPES = ['thunder', 'sand', 'snow', 'wind'];
+const WEATHER_NAMES = { thunder: '雷暴天', sand: '沙暴天气', snow: '冰雪天', wind: '狂风天气' };
+const WEATHER_COLORS = { thunder: '#8f7bff', sand: '#e0b34a', snow: '#8ed7ff', wind: '#8fe0b0' };
 
 // 创建植物并扣阳光；p.timer 按类型承载不同用途（产阳光 / 发射 / 地雷预热）
 function createPlant(type, row, col, free) {
@@ -660,7 +697,7 @@ function createPlant(type, row, col, free) {
     flash: 0            // 受击白闪剩余秒数
   };
   if (type === 'potatomine') p.timer = MINE_ARM_TIME;
-  if (type === 'sunflower')  p.timer = SUNFLOWER_INTERVAL;
+  if (type === 'sunflower' || type === 'twinsunflower' || type === 'icesunflower' || type === 'firesunflower') p.timer = SUNFLOWER_INTERVAL;
   if (type === 'jalapeno')   p.fuse = JALAPENO_FUSE;
   if (type === 'cherrybomb') p.fuse = CHERRY_FUSE;
   game.plants.push(p);
@@ -686,20 +723,24 @@ const ZOMBIE_TYPES = {
   runner:     { name: '迟到狂奔僵尸', bodyHp: 260, helmetHp: 0, speedMul: 1, pole: false, color: '#a7a36e', runner: true }, // 3~5 秒后/首伤后冲刺，速度×2
   sleepy:     { name: '睡眼惺忪僵尸', bodyHp: 200, helmetHp: 0, speedMul: 0.8, pole: false, color: '#a8b08a', sleepy: true }, // 随机打瞌睡，受击惊醒并短暂提速
   teacher:    { name: '僵尸老师',   bodyHp: 800,  helmetHp: 0,    speedMul: 0.5,  pole: false, color: '#7a8790', teacher: true }, // 灰蓝西装，慢速高血，身后召唤最多 5 名学生
+  // 惊喜天气专属：只由天气系统生成，不进入普通抽卡池
+  thunderteacher: { name: '雷电老师僵尸', bodyHp: 400, helmetHp: 0, speedMul: 1, pole: false, color: '#6f7fc0', thunderTeacher: true },
+  skater:     { name: '滑冰学生僵尸', bodyHp: 400, helmetHp: 0,   speedMul: 2,    pole: false, color: '#7fc8e8', skater: true },
   gargantuar: { name: '巨人僵尸',   bodyHp: 3000, helmetHp: 0,    speedMul: 0.45, pole: false, color: '#7d6b58', garg: true }, // 高血慢速、砸扁植物、半血抛小鬼
   imp:        { name: '小鬼僵尸',   bodyHp: 200,  helmetHp: 0,    speedMul: 2.2,  pole: false, color: '#c9b27a' } // 巨人抛出的小鬼：血少跑得快
 };
 const NEWSPAPER_RAGE = 2.6;   // 读报僵尸报纸碎裂后的狂暴速度倍数
 
 /* ============================ 3.5 图鉴数据 ============================ */
-const ZOMBIE_ORDER = ['normal', 'buddy', 'cone', 'pole', 'bucket', 'flag', 'newspaper', 'screendoor', 'football', 'runner', 'sleepy', 'teacher', 'imp', 'gargantuar'];
+const ZOMBIE_ORDER = ['normal', 'buddy', 'cone', 'pole', 'bucket', 'flag', 'newspaper', 'screendoor', 'football', 'runner', 'sleepy', 'teacher', 'thunderteacher', 'skater', 'imp', 'gargantuar'];
 // 植物图鉴：基础数值直接读 PLANT_TYPES，这里补充分类和实战技巧
 const PLANT_CODEX = {
   sunflower:   { role: '经济', tip: '越早种越赚。前两列优先铺向日葵，阳光多了再补输出。' },
+  twinsunflower: { role: '经济', tip: '每次产 2 份阳光，但 150 阳光的回本速度依赖种植时机；前期先有基础防御再补。' },
   peashooter:  { role: '输出', tip: '最稳的基础输出，每行至少铺 1～2 个，别让某一行完全空着。' },
   repeater:    { role: '输出', tip: '单行火力翻倍，适合补强僵尸压力最大的那一行。' },
-  wallnut:     { role: '防御', tip: '撑杆跳跳不过去；但巨人僵尸会直接把它砸扁。' },
-  tallnut:     { role: '防御', tip: '8000 血更耐啃，同样能挡住撑杆跳，适合拖住铁桶和橄榄球。' },
+  wallnut:     { role: '防御', tip: '撑杆跳可以跳过普通坚果；巨人僵尸也会直接把它砸扁。要挡撑杆跳请用高坚果或雨滴进阶坚果。' },
+  tallnut:     { role: '防御', tip: '8000 血更耐啃，能挡住撑杆跳，适合拖住铁桶和橄榄球。' },
   potatomine:  { role: '一次性', tip: '17.5 秒预热；撑杆跳会跳过它。放在僵尸必经之路上。' },
   chomper:     { role: '单体控制', tip: '能吞掉自己格子和前面一格内的非巨人僵尸；咀嚼 42 秒，期间很容易被啃，前面最好有坚果。' },
   melonpult:   { role: '范围输出', tip: '80 直伤 + 40 溅射，成堆小僵尸的克星。' },
@@ -708,14 +749,21 @@ const PLANT_CODEX = {
   squash:      { role: '一次性', tip: '前后 1.5 格都能砸；非巨人必杀，巨人只掉 1800。' },
   jalapeno:    { role: '一次性', tip: '烧穿整行，非巨人必杀并清冰道；不要浪费在单只普通僵尸上。' },
   firepea:     { role: '输出', tip: '40 直伤 + 13 溅射 + 3 秒灼烧，打护甲也稳。' },
-  cherrybomb:  { role: '一次性', tip: '九宫格非巨人必杀；大波僵尸挤在一起时收益最高。' }
+  cherrybomb:  { role: '一次性', tip: '九宫格非巨人必杀；大波僵尸挤在一起时收益最高。' },
+  icesunflower: { role: '经济/控制', tip: '普通向日葵用进阶冰雨滴合成；啃食减速适合放在前排拖延。' },
+  firesunflower: { role: '经济/反伤', tip: '普通向日葵用进阶火雨滴合成；被啃时持续烧啃食者，适合放在危险车道。' },
+  icewallnut:  { role: '防御/控制', tip: '普通坚果用进阶冰雨滴合成；1.5 倍血、啃食减速，撑杆跳不能跳过。' },
+  icetallnut:  { role: '防御/控制', tip: '高坚果用进阶冰雨滴合成；1.5 倍血、啃食减速，撑杆跳不能跳过。' },
+  firewallnut: { role: '防御/反伤', tip: '普通坚果用进阶火雨滴合成；1.5 倍血，啃食者每秒受 10 点火焰伤害。' },
+  firetallnut: { role: '防御/反伤', tip: '高坚果用进阶火雨滴合成；1.5 倍血，啃食者每秒受 10 点火焰伤害。' },
+  firemelon:   { role: '范围输出', tip: '西瓜投手用进阶火雨滴合成；80 直伤 + 40 溅射，命中附带每秒 10 点火焰伤害。' }
 };
 // 僵尸图鉴：hp 为基础值（实际会随关卡/无尽时间放大）
 const ZOMBIE_CODEX = {
   normal:     { hp: '200', speed: '1.0×', first: '第 1 波', threat: '★', detail: '最普通的僵尸，没有护甲，也没有特殊能力。', tip: '任意输出都能处理；别让某一行完全没有防御。' },
   buddy:      { hp: '200 / 只（共 2 只）', speed: '1.0×', first: '第 5 波起', threat: '★★', detail: '两个好朋友结伴上学，并排走同一车道；只要另一只还活着，两只都获得 20% 减伤。AOE 可以同时命中两只，一只倒下后另一只失去减伤。', tip: '用西瓜/爆炸同时打两只；一次性植物仍然必杀，先拆掉一只就能解除减伤。' },
   cone:       { hp: '320（护甲 120 + 本体 200）', speed: '1.0×', first: '约 35 秒后 / 第 2 波起', threat: '★★', detail: '头戴路障，护甲会先吸收伤害。', tip: '豌豆集火即可；爆炸、火焰和西瓜溅射更快。' },
-  pole:       { hp: '340', speed: '撑杆状态约 2×，落地后 1.0×', first: '约 70 秒后 / 第 3 波起', threat: '★★', detail: '会跳过第一个非坚果植物，落地后变成普通速度；土豆地雷也会被跳过。', tip: '用坚果/高坚果挡住，或在起跳前集中火力。' },
+  pole:       { hp: '340', speed: '撑杆状态约 2×，落地后 1.0×', first: '约 70 秒后 / 第 3 波起', threat: '★★', detail: '会跳过第一个普通植物或普通坚果，落地后变成普通速度；跳不过高坚果、寒冰坚果、寒冰高坚果、火焰坚果、火焰高坚果。', tip: '普通坚果挡不住它；用高坚果或雨滴进阶坚果拦下，或在起跳前集中火力。' },
   bucket:     { hp: '1370（护甲 1170 + 本体 200）', speed: '1.0×', first: '约 120 秒后 / 第 4 波起', threat: '★★★', detail: '铁桶护甲非常厚，能扛大量豌豆。', tip: '西瓜/烈焰/爆炸更有效；寒冰减速可以拖时间。' },
   flag:       { hp: '200', speed: '1.0×', first: '第 6 / 10 / 14… 波旗帜大波', threat: '★', detail: '旗帜大波的带头僵尸，背红旗，本身和普通僵尸一样。', tip: '优先点掉可以少一个麻烦；但别忽略后面的大部队。' },
   newspaper:  { hp: '370（报纸 170 + 本体 200）', speed: '0.55×，碎报后 2.6×', first: '第 4 波起', threat: '★★', detail: '报纸没碎时走得很慢；报纸打碎后会暴怒加速。', tip: '要么快速打碎，要么用坚果拖住；别只打一半。' },
@@ -724,6 +772,8 @@ const ZOMBIE_CODEX = {
   runner:     { hp: '260', speed: '1.0× → 冲刺 2.0×', first: '第 6 波起', threat: '★★★', detail: '睡过头快迟到了：开局 3～5 秒正常速度，第一次受伤或计时结束立刻进入狂奔，速度翻倍直到死亡/到校门。', tip: '寒冰/冰道能压住冲刺；在它起跑前用坚果或一次性植物处理。' },
   sleepy:     { hp: '200', speed: '0.8×（平均更慢）', first: '第 5 波起', threat: '★★', detail: '特困生：随机原地打瞌睡 1～2 秒；打瞌睡时被攻击会惊醒，并短暂提速 30%，清醒一阵后又会犯困。', tip: '趁它睡着集中输出；注意它惊醒后的短冲刺，别让残血溜过去。' },
   teacher:    { hp: '800', speed: '0.5×', first: '第 8 波起', threat: '★★★★', detail: '带队的僵尸老师，拿着教案，移动很慢；每 3.8～5.2 秒在身后召唤 1 名普通僵尸，最多召唤 5 名。老师死后，已召唤的学生继续前进，但不再生成新学生。', tip: '优先集火老师，越早击杀越少学生；也可以用地雷/樱桃清掉身后队伍。' },
+  thunderteacher: { hp: '400（普通 2 倍）', speed: '1.0×', first: '仅雷暴天', threat: '★★★★', detail: '手持引雷针的雷电老师。每 5 秒释放一次雷击，共 3 次；每次随机 3 个格子，格子里的植物直接消失（不伤害僵尸）。', tip: '雷暴天会成组出现；尽快用高输出或一次性植物处理，别让它站桩放完 3 次雷。' },
+  skater:     { hp: '400（普通 2 倍）', speed: '2.0×', first: '仅冰雪天', threat: '★★★★', detail: '脚踩雪橇的滑冰学生，移动速度是普通僵尸的 2 倍；自身不受冰雪天的减速影响。', tip: '别指望冰雪天拖住它；用坚果、寒冰以外的硬控或高爆发拦下。' },
   imp:        { hp: '200', speed: '2.2×', first: '巨人半血时抛出', threat: '★★', detail: '血少但跑得飞快，被巨人扔到前排。', tip: '范围伤害/冰道招呼；优先点掉，别让它摸到后排。' },
   gargantuar: { hp: '3000', speed: '0.45×', first: '第 8 波起；第 14 关最终波固定', threat: '★★★★★', detail: '巨人僵尸，会直接砸扁植物；血量降到一半会抛出小鬼。', tip: '一次性植物只造成 1800；用坚果拖住，配合多组输出和爆炸慢慢磨。' }
 };
@@ -776,6 +826,11 @@ function createZombie(type, row) {
     summoned: 0,          // 已召唤学生数
     maxSummon: 5,         // 最多召唤 5 名
     summonTimer: rand(2.5, 4.5), // 下一次召唤倒计时
+    // ---- 惊喜天气专属僵尸 ----
+    thunderTeacher: !!t.thunderTeacher, // 雷电老师：每5秒落雷3格，共3次
+    stormCasts: 0,
+    stormCastTimer: 5,
+    skater: !!t.skater,   // 滑冰学生：2倍速，免疫冰雪天减速
     name: t.name, color: t.color
   };
   game.zombies.push(z);
@@ -898,6 +953,7 @@ function throwMelon(p, tgt, kind) {
   game.projectiles.push({ kind: kind || 'melon', sx, sy, x: sx, y: sy, t: 0, dur: d / MELON_SPEED, tgt, ex: tgt.x, ey: tgt.y, arc });
 }
 function throwIceMelon(p, tgt) { throwMelon(p, tgt, 'iceMelon'); }
+function throwFireMelon(p, tgt) { throwMelon(p, tgt, 'fireMelon'); }
 
 // 寒冰系统：命中减速 / 冰道（区域持续减速） / 辣椒清除冰道
 function slowZombie(z) { z.slowTimer = ICE_SLOW_TIME; }
@@ -917,7 +973,9 @@ function zombieSpeed(z) {
   const onIce = game.iceTracks.some(t => t.row === z.row && t.col === col);
   const slow = (z.slowTimer > 0 || onIce) ? 0.5 : 1;
   const wake = z.wakeTimer > 0 ? 1.3 : 1;   // 睡眼惺忪被惊醒后的短暂提速
-  return z.speed * slow * wake;
+  // 冰雪天全体僵尸减速；滑冰学生免疫天气减速
+  const snowSlow = (game.weather && game.weather.type === 'snow' && !z.skater) ? 0.65 : 1;
+  return z.speed * slow * wake * snowSlow;
 }
 
 // 生成一个阳光：从 (x,y) 下落到 targetY，落地后停留一段时间
@@ -925,7 +983,7 @@ function spawnSun(x, y, targetY) {
   game.suns.push({ x, y, targetY, vy: targetY > y ? 90 : 0, vx: rand(-10, 10), life: 13, age: 0, state: 'idle' });
 }
 // 馅饼模式：只掉非向日葵植物卡；卡是"植物实例"，可以重复
-const PIE_PLANT_TYPES = PLANT_ORDER.filter(t => t !== 'sunflower');
+const PIE_PLANT_TYPES = PLANT_ORDER.filter(t => t !== 'sunflower' && t !== 'twinsunflower');
 function spawnPieCard() {
   const type = PIE_PLANT_TYPES[randInt(0, PIE_PLANT_TYPES.length - 1)];
   let x = rand(70, W - 70);
@@ -996,6 +1054,7 @@ function update(dt) {
   game.time += dt;
   for (const k in game.cd) if (game.cd[k] > 0) game.cd[k] = Math.max(0, game.cd[k] - dt); // 各植物冷却独立计时
   updateSpawning(dt);
+  if (game.mode === 'weather') updateWeather(dt);  // 惊喜天气：状态机 + 天气效果
   updateSuns(dt);
   if (game.mode === 'pie') updatePieDrops(dt);   // 天上掉植物卡
   // 植物更新（死亡统一置 hp=0，循环结束后过滤，避免遍历中 splice 错位）
@@ -1003,6 +1062,8 @@ function update(dt) {
   game.plants = game.plants.filter(p => p.hp > 0);
   updateProjectiles(dt);
   updateZombies(dt);
+  // 雷电老师可能在 updateZombies 里清掉植物，这里再过滤一次，避免残留一帧
+  game.plants = game.plants.filter(p => p.hp > 0);
   updateCarts(dt);     // 小推车冲刺（含秒杀本行僵尸 / 碾碎植物）
   updateIceTracks(dt); // 冰道持续时间
   updateParticles(dt);
@@ -1017,6 +1078,7 @@ function update(dt) {
       game.zombies.splice(i, 1);
     }
   }
+  updateWindOffsets(dt);   // 狂风滑动动画
 }
 
 // 刷怪：波次制 + 旗帜大波（原版规则）
@@ -1145,6 +1207,293 @@ function spawnBigWave() {
     game.waveTotal += 1;
   }
 }
+/* ============================ 5.5 惊喜天气模式 ============================ */
+// 天气只会在 weather 模式触发；每次持续30秒，结束后随机45~180秒才会再来。
+function canSpawnWeatherZombie() {
+  return !game.bigPending && !game.result && !game.failVideo && game.waveTotal > 0;
+}
+function spawnWeatherZombie(type) {
+  if (!canSpawnWeatherZombie()) return false;
+  let row = randInt(0, ROWS - 1);
+  // 雷电老师不能全挤在同一行：同一场雷暴里优先选还没用过的车道
+  if (type === 'thunderteacher' && game.weather) {
+    if (!game.weather.teacherRows) game.weather.teacherRows = [];
+    const used = game.weather.teacherRows;
+    const free = [];
+    for (let r = 0; r < ROWS; r++) if (!used.includes(r)) free.push(r);
+    if (free.length) row = free[randInt(0, free.length - 1)];
+    used.push(row);
+  }
+  const z = createZombie(type, row);
+  z.x = W + 40 + rand(0, 55);
+  game.waveTotal += 1;          // 天气专属僵尸也算进本波清场数
+  return true;
+}
+function pickWindRows() {
+  const pool = [0, 1, 2, 3, 4], rows = [];
+  for (let i = 0; i < 3; i++) rows.push(pool.splice(randInt(0, pool.length - 1), 1)[0]);
+  return rows;
+}
+function startWeather() {
+  let choices = WEATHER_TYPES.filter(t => t !== game.weatherLast);
+  if (!choices.length) choices = WEATHER_TYPES.slice();
+  const type = choices[randInt(0, choices.length - 1)];
+  const w = {
+    type, timeLeft: WEATHER_DURATION, elapsed: 0,
+    pending: 0, spawnTimer: 0,
+    strikes: [], nextStrike: 0,
+    intensity: 0, windNext: 3,
+    level: 0, rows: []
+  };
+  if (type === 'thunder') {
+    w.pending = randInt(1, 3);              // 雷电老师 1~3 只
+    w.teacherRows = [];                     // 老师分散到不同车道
+    w.spawnTimer = 1.2;
+    // 天空闪电降低频率：最多 4 道，且相邻两道至少间隔 7 秒
+    const n = randInt(1, 4);
+    let at = rand(4, 7);
+    for (let i = 0; i < n && at < 28; i++) {
+      w.strikes.push({ at, cells: randInt(1, 5) });
+      at += rand(7, 10.5);
+    }
+    w.strikes.sort((a, b) => a.at - b.at);
+    sfx('boom');
+  } else if (type === 'snow') {
+    w.pending = randInt(2, 4);              // 滑冰学生 2~4 只
+    w.spawnTimer = 1.2;
+  } else if (type === 'wind') {
+    w.level = randInt(1, 3);
+    w.rows = pickWindRows();
+    w.windNext = 3;                 // 第一次吹风在 3 秒警告后
+    game.warn = {
+      text: w.level + ' 级狂风即将来袭！',
+      ttl: 3,
+      sub: '3 条随机车道向右吹动 ' + w.level + ' 格，每 7 秒以上会再次吹动；巨人不受影响'
+    };
+    sfx('wave');
+  }
+  game.weather = w;
+  game.weatherLast = type;
+  showToast('天气变化：' + WEATHER_NAMES[type]);
+}
+function endWeather() {
+  game.weather = null;
+  game.weatherCooldown = rand(WEATHER_MIN_GAP, WEATHER_MAX_GAP);
+  showToast('天气结束，下一场天气将在 45~180 秒后');
+}
+function addLightningFx(row, col) {
+  const c = cellCenter(col, row);
+  game.lightningFx.push({
+    row, col, x: c.x, y: c.y,
+    age: 0, ttl: 0.55,
+    seed: Math.random() * 999
+  });
+}
+// 闪电命中一个格子：根据 plantsOnly 决定是否也清除格子里的僵尸
+function lightningCell(row, col, plantsOnly) {
+  addLightningFx(row, col);
+  for (const p of game.plants) {
+    if (p.hp > 0 && p.row === row && p.col === col) {
+      p.hp = 0;
+      addParticle(p.x, p.y, 'explode');
+    }
+  }
+  if (!plantsOnly) {
+    const colNow = col;
+    for (const z of game.zombies) {
+      if (z.hp <= 0 || z.row !== row) continue;
+      if (clamp(Math.floor(z.x / CELL_W), 0, COLS - 1) === colNow) {
+        z.hp = 0;                          // 本帧末统一清理并计入击杀
+        addParticle(z.x, z.y, 'zombieDie');
+      }
+    }
+  }
+}
+function randomLightningCells(count, plantsOnly) {
+  const used = new Set();
+  for (let i = 0; i < count; i++) {
+    const row = randInt(0, ROWS - 1), col = randInt(0, COLS - 1);
+    const key = row * COLS + col;
+    if (used.has(key)) continue;
+    used.add(key);
+    lightningCell(row, col, plantsOnly);
+  }
+  sfx('boom');
+}
+// 狂风：每次随机 3 条车道，植物和僵尸一起向右吹 level 格；巨人免疫
+function applyWind(w) {
+  w.rows = pickWindRows();        // 每次吹风重新随机 3 行
+  const step = w.level * CELL_W;
+  const animSpeed = step / 0.55;  // 0.55 秒的向右滑动动画
+  for (const row of w.rows) {
+    // 植物从最右侧开始移动，避免目标格被尚未移动的植物占住
+    const rowPlants = game.plants.filter(p => p.row === row && p.hp > 0).sort((a, b) => b.x - a.x);
+    for (const p of rowPlants) {
+      const nx = p.x + step;
+      if (nx >= W) { p.hp = 0; addParticle(p.x, p.y, 'hit'); continue; }   // 吹出右边界
+      const nc = clamp(Math.floor(nx / CELL_W), 0, COLS - 1);
+      if (game.plants.some(q => q !== p && q.hp > 0 && q.row === row && q.col === nc)) {
+        p.hp = 0; addParticle(p.x, p.y, 'hit'); continue;   // 被吹进另一株植物：消失
+      }
+      p.x = nx; p.col = nc;
+      p.windOffset = -step;         // 绘制时从旧位置滑到新位置
+      p.windAnimSpeed = animSpeed;
+    }
+    // 僵尸向右吹，越过右边界直接消失；巨人不受影响。
+    // 还在屏幕右侧外、尚未入场的僵尸不参与，避免"吹掉未出场僵尸"。
+    for (const z of game.zombies) {
+      if (z.hp <= 0 || z.row !== row || z.garg || z.x > W) continue;
+      z.x += step;
+      if (z.x >= W) {
+        z.hp = 0;
+        addParticle(z.x, z.y, 'zombieDie');
+      } else {
+        z.windOffset = -step;
+        z.windAnimSpeed = animSpeed;
+      }
+    }
+  }
+  addParticle(W / 2, H / 2 - 40, 'explode');
+  sfx('boom');
+}
+// 被风吹动的实体在绘制时带一个短暂的滑动偏移
+function updateWindOffsets(dt) {
+  for (const p of game.plants) {
+    if (!p.windOffset) continue;
+    p.windOffset = Math.min(0, p.windOffset + (p.windAnimSpeed || CELL_W * 2) * dt);
+    if (p.windOffset >= 0) { p.windOffset = 0; delete p.windAnimSpeed; }
+  }
+  for (const z of game.zombies) {
+    if (!z.windOffset) continue;
+    z.windOffset = Math.min(0, z.windOffset + (z.windAnimSpeed || CELL_W * 2) * dt);
+    if (z.windOffset >= 0) { z.windOffset = 0; delete z.windAnimSpeed; }
+  }
+}
+function updateWeather(dt) {
+  // 闪电特效独立老化
+  for (let i = game.lightningFx.length - 1; i >= 0; i--) {
+    game.lightningFx[i].age += dt;
+    if (game.lightningFx[i].age >= game.lightningFx[i].ttl) game.lightningFx.splice(i, 1);
+  }
+  if (!game.weather) {
+    game.weatherCooldown -= dt;
+    if (game.weatherCooldown <= 0) startWeather();
+    return;
+  }
+  const w = game.weather;
+  w.timeLeft -= dt;
+  w.elapsed += dt;
+
+  // 天气专属僵尸：分批生成，避开大波待发/本波计数为0的瞬间
+  if (w.pending > 0) {
+    w.spawnTimer -= dt;
+    if (w.spawnTimer <= 0) {
+      const type = w.type === 'thunder' ? 'thunderteacher' : 'skater';
+      if (spawnWeatherZombie(type)) w.pending--;
+      w.spawnTimer = 1.4;
+    }
+  }
+
+  if (w.type === 'thunder') {
+    while (w.nextStrike < w.strikes.length && w.elapsed >= w.strikes[w.nextStrike].at) {
+      randomLightningCells(w.strikes[w.nextStrike].cells, false);
+      w.nextStrike++;
+    }
+  } else if (w.type === 'sand') {
+    w.intensity = Math.min(1, w.elapsed / 24);   // 24 秒后完全看不见
+  } else if (w.type === 'snow') {
+    // 视觉粒子在 drawWeather 中用时间生成，不需要状态
+  } else if (w.type === 'wind') {
+    // 30 秒内可多次吹风：第一次 3 秒，之后每次至少间隔 7 秒
+    if (w.elapsed >= w.windNext && w.timeLeft > 0.2) {
+      applyWind(w);
+      w.windNext += rand(7.5, 10.5);
+      showToast('狂风再次吹动：3 条车道向右 ' + w.level + ' 格');
+    }
+  }
+
+  if (w.timeLeft <= 0) endWeather();
+}
+// 雷电老师技能：随机3格植物消失，共3次
+function thunderTeacherCast(z) {
+  randomLightningCells(3, true);
+  addParticle(z.x, z.y, 'jump');
+  sfx('boom');
+}
+// 天气绘制：只覆盖操场区域，HUD/卡槽保持可见，沙暴时仍可操作
+function drawWeather() {
+  if (game.mode !== 'weather') return;
+  const top = GRID_TOP, bottom = H - BAR_H;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, top, W, bottom - top); ctx.clip();
+  const w = game.weather;
+  if (w) {
+    if (w.type === 'thunder') {
+      // 乌云压顶 + 紫蓝色天光
+      ctx.fillStyle = 'rgba(20,18,45,0.34)'; ctx.fillRect(0, top, W, bottom - top);
+      for (let i = 0; i < 7; i++) {
+        const cx = ((i * 137 + game.time * 8) % (W + 220)) - 110;
+        const cy = top + 18 + (i % 3) * 12;
+        ctx.fillStyle = 'rgba(28,26,55,0.55)';
+        ctx.beginPath(); ctx.ellipse(cx, cy, 95, 26, 0, 0, TAU); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(cx + 55, cy + 8, 70, 20, 0, 0, TAU); ctx.fill();
+      }
+    } else if (w.type === 'sand') {
+      const a = 0.08 + 0.92 * w.intensity;
+      ctx.fillStyle = 'rgba(196,154,54,' + a.toFixed(3) + ')';
+      ctx.fillRect(0, top, W, bottom - top);
+      if (w.intensity > 0.55) {
+        ctx.fillStyle = 'rgba(230,190,88,' + (0.10 * w.intensity).toFixed(3) + ')';
+        for (let i = 0; i < 20; i++) {
+          const x = ((i * 97 + game.time * (60 + i * 2)) % (W + 80)) - 40;
+          const y = top + ((i * 53 + game.time * 20) % (bottom - top));
+          ctx.fillRect(x, y, 2, 14);
+        }
+      }
+    } else if (w.type === 'snow') {
+      ctx.fillStyle = 'rgba(120,190,240,0.10)'; ctx.fillRect(0, top, W, bottom - top);
+      // 雪花
+      for (let i = 0; i < 46; i++) {
+        const x = (i * 61 + game.time * (18 + (i % 5) * 8)) % (W + 40) - 20;
+        const y = top + ((i * 37 + game.time * (34 + (i % 7) * 6)) % (bottom - top));
+        ctx.fillStyle = 'rgba(235,250,255,' + (0.35 + (i % 3) * 0.15) + ')';
+        ctx.beginPath(); ctx.arc(x, y, 1.4 + (i % 3), 0, TAU); ctx.fill();
+      }
+    } else if (w.type === 'wind') {
+      ctx.fillStyle = 'rgba(130,220,170,0.06)'; ctx.fillRect(0, top, W, bottom - top);
+      for (let i = 0; i < 18; i++) {
+        const x = ((i * 83 + game.time * 130) % (W + 120)) - 60;
+        const y = top + ((i * 31 + game.time * 40) % (bottom - top));
+        ctx.strokeStyle = 'rgba(180,255,220,0.22)'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 46, y - 5); ctx.stroke();
+      }
+      // 被吹动的3条车道标记
+      for (const row of w.rows) {
+        ctx.fillStyle = 'rgba(255,210,63,0.07)';
+        ctx.fillRect(0, top + row * CELL_H, W, CELL_H);
+      }
+    }
+  }
+  // 闪电特效（无论天气是否结束，让特效播完）
+  for (const fx of game.lightningFx) {
+    const a = clamp(1 - fx.age / fx.ttl, 0, 1);
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = '#e8e1ff'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    ctx.beginPath();
+    let x = fx.x + 30, y = fx.y - 70;
+    ctx.moveTo(x, y);
+    for (let i = 0; i < 4; i++) {
+      x += (i % 2 ? 10 : -12) + Math.sin(fx.seed + i) * 6;
+      y += 18;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+}
+
 // 僵尸解锁池：普通/路障/撑杆/铁桶按时间解锁（时间阈值乘难度系数）；
 // 读报/结伴/睡眼/铁门/狂奔/橄榄球/老师/巨人按波次解锁，保证后期和无尽模式都能见到。
 function unlockedZombieTypes() {
@@ -1196,22 +1545,37 @@ function updateSuns(dt) {
   }
 }
 
+// 冰雪天攻击节奏：普通植物变慢，冰系植物反而更快
+const WEATHER_ICE_PLANTS = new Set(['snowpea', 'wintermelon']);
+function plantAttackRate(p) {
+  if (!game.weather || game.weather.type !== 'snow') return 1;
+  return WEATHER_ICE_PLANTS.has(p.type) ? 1.35 : 0.65;
+}
 // 单个植物的行为逻辑（按类型分派）
 function updatePlant(p, dt) {
   p.flash = Math.max(0, p.flash - dt);
+  const atkRate = plantAttackRate(p);
   // 双发射手：第一发之后 0.13 秒补第二发
   if (p.second > 0) {
-    p.second -= dt;
+    p.second -= dt * atkRate;
     if (p.second <= 0) { p.second = 0; shootPea(p); }
   }
   switch (p.type) {
-    case 'sunflower': // 每 15s 产一个阳光，落在自己身上
+    case 'sunflower': case 'icesunflower': case 'firesunflower': // 每 15s 产一个阳光
       p.timer -= dt;
       if (p.timer <= 0) { spawnSun(p.x + rand(-6, 6), p.y - 42, p.y + 18); p.timer = SUNFLOWER_INTERVAL; }
       break;
+    case 'twinsunflower': // 双头向日葵：同一时刻产 2 个阳光
+      p.timer -= dt;
+      if (p.timer <= 0) {
+        spawnSun(p.x - 14 + rand(-4, 4), p.y - 42, p.y + 18);
+        spawnSun(p.x + 14 + rand(-4, 4), p.y - 42, p.y + 18);
+        p.timer = SUNFLOWER_INTERVAL;
+      }
+      break;
     case 'peashooter': case 'snowpea': case 'firepea': case 'repeater': // 四种射手：同行右侧有僵尸才发射，每 1.4s 一轮
       if (hasZombieAhead(p)) {
-        p.timer -= dt;
+        p.timer -= dt * atkRate;
         if (p.timer <= 0) {
           if (p.type === 'snowpea') shootIcePea(p);
           else if (p.type === 'firepea') shootFirePea(p);
@@ -1221,13 +1585,14 @@ function updatePlant(p, dt) {
         }
       } else p.timer = Math.max(0, p.timer);
       break;
-    case 'melonpult': case 'wintermelon': { // 本行投射：本行有僵尸才投，优先打本行最靠左（威胁最大）的僵尸，弹道逐帧跟踪保证命中
+    case 'melonpult': case 'wintermelon': case 'firemelon': { // 本行投射：本行有僵尸才投，优先打本行最靠左（威胁最大）的僵尸，弹道逐帧跟踪保证命中
       let mt = null;
       for (const z of game.zombies) if (z.hp > 0 && z.row === p.row && (!mt || z.x < mt.x)) mt = z;
       if (mt) {
-        p.timer -= dt;
+        p.timer -= dt * atkRate;
         if (p.timer <= 0) {
           if (p.type === 'wintermelon') throwIceMelon(p, mt);
+          else if (p.type === 'firemelon') throwFireMelon(p, mt);
           else throwMelon(p, mt);
           p.timer = MELON_INTERVAL;
         }
@@ -1317,7 +1682,7 @@ function explodeMine(p) {
 function updateProjectiles(dt) {
   for (let i = game.projectiles.length - 1; i >= 0; i--) {
     const pr = game.projectiles[i];
-    if (pr.kind === 'melon' || pr.kind === 'iceMelon') {
+    if (pr.kind === 'melon' || pr.kind === 'iceMelon' || pr.kind === 'fireMelon') {
       // 西瓜 / 冰瓜：目标每帧跟踪僵尸当前位置（本行弹道），抛物线（sin 弧度拱起）飞行，保证落点命中
       if (pr.tgt && pr.tgt.hp > 0) { pr.ex = pr.tgt.x; pr.ey = pr.tgt.y; }
       pr.t += dt / pr.dur;
@@ -1334,10 +1699,12 @@ function updateProjectiles(dt) {
         if (nearest) {
           damageZombie(nearest, MELON_DAMAGE);
           if (pr.kind === 'iceMelon') slowZombie(nearest);
+          if (pr.kind === 'fireMelon') nearest.burnTimer = FIRE_BURN_TIME;
           for (const z of game.zombies) {
             if (z !== nearest && z.hp > 0 && dist(z.x, z.y, pr.x, pr.y) <= MELON_RADIUS) {
               damageZombie(z, MELON_SPLASH);
               if (pr.kind === 'iceMelon') slowZombie(z);
+              if (pr.kind === 'fireMelon') z.burnTimer = FIRE_BURN_TIME;
             }
           }
         }
@@ -1417,6 +1784,16 @@ function updateZombies(dt) {
     const asleep = z.sleepy && z.sleepState === 'dozing';
     if (asleep) { z.eating = false; z.bitePhase = 0; }
 
+    // ---- 雷电老师：每5秒落雷一次，共3次；每次随机3格，只清植物 ----
+    if (z.thunderTeacher && z.stormCasts < 3) {
+      z.stormCastTimer -= dt;
+      if (z.stormCastTimer <= 0) {
+        z.stormCasts++;
+        z.stormCastTimer = 5;
+        thunderTeacherCast(z);
+      }
+    }
+
     // ---- 僵尸老师：在身后召唤普通学生，最多 5 名；老师死后自然停止 ----
     if (z.teacher && z.summoned < z.maxSummon && !game.bigPending && !game.result && !game.over) {
       z.summonTimer -= dt;
@@ -1435,7 +1812,7 @@ function updateZombies(dt) {
       const frontCol = Math.floor((z.x - z.speed * dt) / CELL_W);
       if (frontCol >= 0 && frontCol < COLS) {
         const p = plantAt(z.row, frontCol);
-        if (p && p.type !== 'wallnut' && p.type !== 'tallnut') {
+        if (p && !POLE_BLOCK_TYPES.has(p.type)) {   // 普通坚果可跳过，高坚果/寒冰/火焰坚果挡下
           z.x = p.x - CELL_W * 0.6 - 10;  // 落到该植物左侧
           z.poleActive = false;
           z.speed = game.diff.normalSpeed * z.spdMul;
@@ -1464,10 +1841,17 @@ function updateZombies(dt) {
       } else {
         z.eating = true;
         z.bitePhase += dt;
-        p.hp -= ZOMBIE_BITE * dt;                   // 持续啃食
+        let bite = ZOMBIE_BITE;
+        if (BITE_SLOW_TYPES.has(p.type)) bite *= 0.5;   // 寒冰植物：啃食速度减半
+        p.hp -= bite * dt;                              // 持续啃食
         p.flash = Math.max(p.flash, 0.08);
+        const burn = BITE_BURN_TYPES[p.type];
+        if (burn) {
+          z.hp -= burn * dt;                            // 火焰植物：反烧啃食者
+          z.flash = Math.max(z.flash, 0.08);
+        }
         sfx('eat');
-        if (p.hp <= 0) p.hp = 0;                    // 血量归零 → 过滤时移除
+        if (p.hp <= 0) p.hp = 0;                        // 血量归零 → 过滤时移除
       }
     } else {
       z.eating = false;
@@ -1557,12 +1941,15 @@ function drawBase() {
     return;
   }
   drawBattleField();
+  drawWeather();      // 天气视觉只覆盖操场，HUD/卡槽仍可操作
   drawSuns(true);     // 正在飞向计数器的阳光画在 HUD 之上，保证收入动画可见
   drawHUD();
   if (game.mode === 'pie') drawPieBar();
   else drawPlantBar();
   drawGhost();
   drawCardDrag();   // 馅饼模式拖拽卡片时的预览
+  drawRainTray();   // 进阶雨滴快捷托盘
+  drawRainDrag();   // 雨滴拖拽预览
   if (game.warn) drawWarning();   // 红字警告（开局提示 / 大波提示）
   if (game.toast) drawToast();
   if (game.over) drawGameOver();
@@ -1651,10 +2038,15 @@ function saveSettings() {
 
 /* ============================ 全局钱包 / 良商铺 / 卡槽 ============================ */
 // 金币、卡槽上限、背包道具都是跨模式永久数据，统一存一个 localStorage key
-const wallet = { coins: 0, slots: 3, items: { clear: 0, snipe: 0 } };
+const wallet = { coins: 0, slots: 3, items: { clear: 0, snipe: 0, double: 0, ice: 0, fire: 0 } };
+const RAIN_KEYS = ['double', 'ice', 'fire'];
+const RAIN_MAX = 10;               // 三种进阶雨滴每种最多存 10 个
 const SHOP_ITEMS = {
   clear: { name: '清屏卡', price: 60, desc: '任意对局使用一次，清除场上全部僵尸。' },
-  snipe: { name: '清除卡', price: 30, desc: '任意对局使用一次，手动点选清除单只僵尸。' }
+  snipe: { name: '清除卡', price: 30, desc: '任意对局使用一次，手动点选清除单只僵尸。' },
+  double: { name: '进阶双雨滴', price: 20, desc: '拖到向日葵→双头向日葵；拖到豌豆射手→双发射手。' },
+  ice: { name: '进阶冰雨滴', price: 40, desc: '向日葵/豌豆/西瓜/坚果/高坚果可进阶为寒冰系植物。' },
+  fire: { name: '进阶火雨滴', price: 40, desc: '向日葵/豌豆/西瓜/坚果/高坚果可进阶为火焰系植物。' }
 };
 function loadWallet() {
   try {
@@ -1665,6 +2057,9 @@ function loadWallet() {
     if (w.items) {
       if (Number.isFinite(w.items.clear)) wallet.items.clear = Math.max(0, Math.floor(w.items.clear));
       if (Number.isFinite(w.items.snipe)) wallet.items.snipe = Math.max(0, Math.floor(w.items.snipe));
+      for (const k of RAIN_KEYS) {
+        if (Number.isFinite(w.items[k])) wallet.items[k] = clamp(Math.floor(w.items[k]), 0, RAIN_MAX);
+      }
     }
   } catch (e) {}
 }
@@ -1673,7 +2068,13 @@ function saveWallet() {
     localStorage.setItem('pzxs_wallet', JSON.stringify({
       coins: Math.max(0, Math.floor(wallet.coins)),
       slots: clamp(Math.floor(wallet.slots), 3, 10),
-      items: { clear: Math.max(0, Math.floor(wallet.items.clear)), snipe: Math.max(0, Math.floor(wallet.items.snipe)) }
+      items: {
+        clear: Math.max(0, Math.floor(wallet.items.clear)),
+        snipe: Math.max(0, Math.floor(wallet.items.snipe)),
+        double: clamp(Math.floor(wallet.items.double || 0), 0, RAIN_MAX),
+        ice: clamp(Math.floor(wallet.items.ice || 0), 0, RAIN_MAX),
+        fire: clamp(Math.floor(wallet.items.fire || 0), 0, RAIN_MAX)
+      }
     }));
   } catch (e) {}
 }
@@ -1812,8 +2213,9 @@ function drawIntro() {
 const CODEX_TAB_PLANT  = { x: W / 2 - 190, y: 68, w: 180, h: 36 };
 const CODEX_TAB_ZOMBIE = { x: W / 2 + 10,  y: 68, w: 180, h: 36 };
 const CODEX_PANEL = { x: 35, y: 312, w: 650, h: 296 };
-const CODEX_PLANT_GRID  = { x0: 27, y0: 120, w: 90, h: 74, gap: 6, cols: 7 };
-const CODEX_ZOMBIE_GRID = { x0: 27, y0: 120, w: 90, h: 74, gap: 6, cols: 7 };
+// 15 种植物 / 16 种僵尸：8 列 × 2 行，卡片略窄但名字和血量仍放得下
+const CODEX_PLANT_GRID  = { x0: 37, y0: 120, w: 56, h: 74, gap: 3, cols: 11 }; // 22 种植物：11×2
+const CODEX_ZOMBIE_GRID = { x0: 50, y0: 120, w: 74, h: 74, gap: 4, cols: 8 };
 function codexPlantRect(i) {
   const c = i % CODEX_PLANT_GRID.cols, r = Math.floor(i / CODEX_PLANT_GRID.cols);
   return { x: CODEX_PLANT_GRID.x0 + c * (CODEX_PLANT_GRID.w + CODEX_PLANT_GRID.gap), y: CODEX_PLANT_GRID.y0 + r * (CODEX_PLANT_GRID.h + CODEX_PLANT_GRID.gap), w: CODEX_PLANT_GRID.w, h: CODEX_PLANT_GRID.h };
@@ -1969,10 +2371,10 @@ function drawCodex() {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 24px "Microsoft YaHei",sans-serif';
   ctx.fillText('植物 / 僵尸图鉴', W / 2, 36);
-  drawCodexTab(CODEX_TAB_PLANT, '植物 ' + PLANT_ORDER.length, codex.tab === 'plant');
+  drawCodexTab(CODEX_TAB_PLANT, '植物 ' + ALL_PLANT_ORDER.length, codex.tab === 'plant');
   drawCodexTab(CODEX_TAB_ZOMBIE, '僵尸 ' + ZOMBIE_ORDER.length, codex.tab === 'zombie');
   if (codex.tab === 'plant') {
-    for (let i = 0; i < PLANT_ORDER.length; i++) drawCodexPlantCard(PLANT_ORDER[i], i);
+    for (let i = 0; i < ALL_PLANT_ORDER.length; i++) drawCodexPlantCard(ALL_PLANT_ORDER[i], i);
   } else {
     for (let i = 0; i < ZOMBIE_ORDER.length; i++) drawCodexZombieCard(ZOMBIE_ORDER[i], i);
   }
@@ -2007,12 +2409,26 @@ function drawMode() {
   ctx.fillStyle = '#aeb6c0'; ctx.font = '13px "Microsoft YaHei",sans-serif';
   ctx.fillText('关卡：14 关递进，每关多 1 波、每波僵尸略增', W / 2, 504);
   ctx.fillText('无尽：简单 / 中等 / 困难，撑得越久越硬', W / 2, 526);
-  ctx.fillText('混沌：天上掉馅饼——不掉阳光，改掉植物卡', W / 2, 548);
+  ctx.fillText('混沌：天上掉馅饼 / 惊喜天气，两种规则改写的子玩法', W / 2, 548);
   drawButton(INTRO_BACK, '返回', '#5a6472');
 }
 
 /* ---------- 混沌模式子页面 ---------- */
-const CHAOS_PIE = { x: W / 2 - 180, y: 270, w: 360, h: 64 };
+const CHAOS_PIE = { x: 80, y: 150, w: 560, h: 86 };
+const CHAOS_WEATHER = { x: 80, y: 248, w: 560, h: 86 };
+function drawChaosCard(r, title, desc, color, hover) {
+  ctx.fillStyle = hover ? 'rgba(255,255,255,0.095)' : 'rgba(255,255,255,0.055)';
+  rr(r.x, r.y, r.w, r.h, 12); ctx.fill();
+  ctx.strokeStyle = hover ? color : 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = hover ? 2 : 1; rr(r.x, r.y, r.w, r.h, 12); ctx.stroke();
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = color; ctx.font = 'bold 20px "Microsoft YaHei",sans-serif';
+  ctx.fillText(title, r.x + 24, r.y + 30);
+  ctx.fillStyle = '#c8d0da'; ctx.font = '13px "Microsoft YaHei",sans-serif';
+  ctx.fillText(desc, r.x + 24, r.y + 60);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+  ctx.fillText('开始挑战  →', r.x + r.w - 22, r.y + 30);
+}
 function drawChaos() {
   ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -2020,28 +2436,32 @@ function drawChaos() {
   ctx.fillText('混沌模式', W / 2, 82);
   drawCoinText(W - 134, 82, wallet.coins, 11);
   ctx.fillStyle = '#8a929c'; ctx.font = '13px "Microsoft YaHei",sans-serif';
-  ctx.fillText('规则被改写的子玩法合集 · 第一个玩法已开放', W / 2, 126);
-  // 子玩法卡片
-  ctx.fillStyle = 'rgba(255,255,255,0.055)'; rr(80, 160, 560, 90, 12); ctx.fill();
-  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 20px "Microsoft YaHei",sans-serif';
-  ctx.fillText('天上掉馅饼模式', W / 2, 192);
-  ctx.fillStyle = '#c8d0da'; ctx.font = '13px "Microsoft YaHei",sans-serif';
-  ctx.fillText('删除阳光掉落，改为随机掉植物卡；拾取入槽，免费种植。', W / 2, 220);
-  drawButton(CHAOS_PIE, '开始挑战（中等难度）', '#8a4a8a');
-  ctx.fillStyle = 'rgba(255,255,255,0.045)'; rr(100, 360, 520, 154, 12); ctx.fill();
-  ctx.fillStyle = '#aeb6c0'; ctx.font = '13px "Microsoft YaHei",sans-serif';
-  ctx.fillText('• 初始 ' + wallet.slots + ' 个卡槽（最多 10 个，扩容永久生效）', W / 2, 388);
-  ctx.fillText('• 除了向日葵，其余植物卡都会随机掉落', W / 2, 414);
-  ctx.fillText('• 卡槽存的是植物实例，可以重复；放置后消耗该卡', W / 2, 440);
-  ctx.fillText('• 每撑过一波 +2 金币，结束后统一入账', W / 2, 466);
-  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-  ctx.fillText('当前卡槽上限：' + wallet.slots + ' / 10 ｜ 金币 ' + wallet.coins, W / 2, 500);
+  ctx.fillText('规则被改写的子玩法合集 · 点击卡片开始', W / 2, 124);
+  drawChaosCard(CHAOS_PIE, '天上掉馅饼模式', '删除阳光掉落，改掉植物卡；拾取入槽或拖拽免费种植。', '#d9a6e0', inRect(mouse, CHAOS_PIE));
+  drawChaosCard(CHAOS_WEATHER, '惊喜天气模式', '四种天气随机降临，天气之间随机间隔 45~180 秒；难度对标无尽中等。', '#7fc8e8', inRect(mouse, CHAOS_WEATHER));
+  ctx.fillStyle = 'rgba(255,255,255,0.045)'; rr(80, 356, 560, 174, 12); ctx.fill();
+  ctx.textAlign = 'left'; ctx.fillStyle = '#aeb6c0'; ctx.font = '12px "Microsoft YaHei",sans-serif';
+  const lines = [
+    '天气：雷暴 / 沙暴 / 冰雪 / 狂风，每次 30 秒，间隔随机 45~180 秒，不叠加。',
+    '狂风会先警告；30 秒内多次吹动 3 条车道，每次至少间隔 7 秒。',
+    '雷暴刷雷电老师（1~3 只，分散车道），冰雪刷滑冰学生（2~4 只）。',
+    '天气不会消失已有僵尸；它只是改变战场规则。',
+    '惊喜天气模式按无尽中等结算，每撑过一波 +2 金币。'
+  ];
+  lines.forEach((line, i) => ctx.fillText('• ' + line, 102, 382 + i * 27));
+  ctx.textAlign = 'center'; ctx.fillStyle = '#7f8794'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.fillText('馅饼卡槽上限：' + wallet.slots + ' / 10 ｜ 金币 ' + wallet.coins, W / 2, 548);
   drawButton(INTRO_BACK, '返回', '#5a6472');
 }
 
 /* ---------- 良商铺：金币购买一次性道具 ---------- */
-const SHOP_BUY_CLEAR = { x: 520, y: 300, w: 100, h: 42 };
-const SHOP_BUY_SNIPE = { x: 520, y: 410, w: 100, h: 42 };
+const SHOP_CARDS = {
+  clear:  { x: 80,  y: 250, w: 270, h: 100 },
+  snipe:  { x: 370, y: 250, w: 270, h: 100 },
+  double: { x: 80,  y: 360, w: 270, h: 100 },
+  ice:    { x: 370, y: 360, w: 270, h: 100 },
+  fire:   { x: 225, y: 470, w: 270, h: 100 }
+};
 function drawItemIcon(type, x, y, s) {
   s = s || 1;
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
@@ -2051,7 +2471,7 @@ function drawItemIcon(type, x, y, s) {
     ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.arc(0, 0, 8, 0, TAU); ctx.fill();
     ctx.fillStyle = '#fff'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('清', 0, 1);
-  } else {
+  } else if (type === 'snipe') {
     ctx.strokeStyle = '#e0a817'; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(0, 0, 17, 0, TAU); ctx.stroke();
     ctx.beginPath(); ctx.arc(0, 0, 6, 0, TAU); ctx.stroke();
@@ -2059,6 +2479,20 @@ function drawItemIcon(type, x, y, s) {
     ctx.beginPath(); ctx.moveTo(0, -24); ctx.lineTo(0, -18); ctx.moveTo(0, 18); ctx.lineTo(0, 24); ctx.stroke();
     ctx.fillStyle = '#e0a817'; ctx.font = 'bold 10px "Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('单', 0, 1);
+  } else {
+    // 进阶雨滴：水滴形状 + 中文标记
+    const c = type === 'double' ? '#4bc0a0' : (type === 'ice' ? '#6cc4e8' : '#f07838');
+    const dark = type === 'double' ? '#278a72' : (type === 'ice' ? '#2e86b8' : '#b84018');
+    ctx.fillStyle = c;
+    ctx.beginPath(); ctx.moveTo(0, -27);
+    ctx.quadraticCurveTo(20, -6, 15, 8);
+    ctx.quadraticCurveTo(10, 24, 0, 24);
+    ctx.quadraticCurveTo(-10, 24, -15, 8);
+    ctx.quadraticCurveTo(-20, -6, 0, -27); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = dark; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(type === 'double' ? '双' : (type === 'ice' ? '冰' : '火'), 0, 3);
   }
   ctx.restore();
 }
@@ -2085,31 +2519,51 @@ function drawShop() {
   // 桌上商品与价签
   drawItemIcon('clear', 180, 208, 0.82);
   drawItemIcon('snipe', 540, 208, 0.82);
+  drawItemIcon('double', 300, 208, 0.72);
+  drawItemIcon('ice', 390, 208, 0.72);
+  drawItemIcon('fire', 480, 208, 0.72);
   ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
   ctx.fillText('60 金币', 180, 248);
   ctx.fillText('30 金币', 540, 248);
-  // 商品卡
+  // 商品卡：5 个一次性道具，点击卡片购买
   const products = [
-    { id: 'clear', name: '清屏卡', price: SHOP_ITEMS.clear.price, desc: SHOP_ITEMS.clear.desc, y: 280, buy: SHOP_BUY_CLEAR, color: '#c0392b' },
-    { id: 'snipe', name: '清除卡', price: SHOP_ITEMS.snipe.price, desc: SHOP_ITEMS.snipe.desc, y: 390, buy: SHOP_BUY_SNIPE, color: '#e0a817' }
+    { id: 'clear', color: '#c0392b' },
+    { id: 'snipe', color: '#e0a817' },
+    { id: 'double', color: '#4bc0a0' },
+    { id: 'ice', color: '#6cc4e8' },
+    { id: 'fire', color: '#f07838' }
   ];
   for (const p of products) {
-    ctx.fillStyle = 'rgba(255,255,255,0.05)'; rr(80, p.y, 560, 96, 12); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; rr(80, p.y, 560, 96, 12); ctx.stroke();
-    drawItemIcon(p.id, 122, p.y + 48, 0.92);
+    const item = SHOP_ITEMS[p.id], r = SHOP_CARDS[p.id];
+    const hover = inRect(mouse, r);
+    const rain = RAIN_KEYS.includes(p.id);
+    const full = rain && wallet.items[p.id] >= RAIN_MAX;
+    ctx.fillStyle = hover ? 'rgba(255,255,255,0.095)' : 'rgba(255,255,255,0.05)';
+    rr(r.x, r.y, r.w, r.h, 12); ctx.fill();
+    ctx.strokeStyle = hover ? p.color : 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = hover ? 2 : 1; rr(r.x, r.y, r.w, r.h, 12); ctx.stroke();
+    drawItemIcon(p.id, r.x + 35, r.y + 50, 0.82);
     ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 17px "Microsoft YaHei",sans-serif';
-    ctx.fillText(p.name, 170, p.y + 28);
-    ctx.fillStyle = '#c8d0da'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-    ctx.fillText(p.desc, 170, p.y + 54);
-    ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-    ctx.fillText('背包：' + wallet.items[p.id] + ' 张', 170, p.y + 76);
-    ctx.textAlign = 'center';
-    drawButton(p.buy, '购买 ' + p.price, wallet.coins >= p.price ? p.color : '#4a4f58');
+    ctx.fillStyle = p.color; ctx.font = 'bold 15px "Microsoft YaHei",sans-serif';
+    ctx.fillText(item.name, r.x + 68, r.y + 23);
+    // 价格标签
+    ctx.textAlign = 'right';
+    ctx.fillStyle = wallet.coins >= item.price ? '#ffd23f' : '#ff8080';
+    ctx.font = 'bold 13px "Microsoft YaHei",sans-serif';
+    ctx.fillText(item.price + ' 金币', r.x + r.w - 14, r.y + 23);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#c8d0da'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+    wrapText(item.desc, r.x + 68, r.y + 45, r.w - 82, 15, 2);
+    ctx.fillStyle = full ? '#ff8080' : '#8a929c'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+    ctx.fillText(rain ? ('背包：' + wallet.items[p.id] + ' / ' + RAIN_MAX) : ('背包：' + wallet.items[p.id] + ' 张'), r.x + 68, r.y + 82);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = full ? '#ff8080' : (hover ? '#ffd23f' : '#7f8794');
+    ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+    ctx.fillText(full ? '已满' : '点击购买', r.x + r.w - 14, r.y + 82);
   }
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-  ctx.fillText('一次性道具，跨全部模式通用；使用后消耗 1 张', W / 2, 500);
+  ctx.fillStyle = '#7f8794'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.fillText('进阶雨滴每种最多 10 个；对局内按「雨滴」按钮，把雨滴拖到对应植物上使用', W / 2, 596);
   drawButton(INTRO_BACK, '返回', '#5a6472');
 }
 
@@ -2157,6 +2611,8 @@ function drawItems() {
   }
   ctx.fillStyle = '#7f8794'; ctx.font = '12px "Microsoft YaHei",sans-serif';
   ctx.fillText('清屏卡会立即结算击杀；清除卡点中僵尸后才会消耗', W / 2, 500);
+  ctx.fillStyle = '#9aa3ad'; ctx.font = '11px "Microsoft YaHei",sans-serif';
+  ctx.fillText('进阶雨滴：双 x' + wallet.items.double + ' ｜ 冰 x' + wallet.items.ice + ' ｜ 火 x' + wallet.items.fire + '（对局内点 HUD「雨滴」拖到植物上使用）', W / 2, 522);
   drawButton(INTRO_BACK, '返回', '#5a6472');
 }
 // 立即移除一只僵尸并结算击杀（清屏卡 / 清除卡共用）
@@ -2220,16 +2676,135 @@ function tryUpgradeSlot() {
 function buyShopItem(id) {
   const item = SHOP_ITEMS[id];
   if (!item) return;
+  if (RAIN_KEYS.includes(id) && wallet.items[id] >= RAIN_MAX) {
+    showToast('「' + item.name + '」最多存 ' + RAIN_MAX + ' 个');
+    return;
+  }
   if (wallet.coins < item.price) { showToast('金币不足：' + item.name + '需要 ' + item.price + ' 金币'); return; }
   openDialog('确认购买', '花费 ' + item.price + ' 金币购买「' + item.name + '」？购买后存入背包。', () => {
     if (wallet.coins < item.price) return;
+    if (RAIN_KEYS.includes(id) && wallet.items[id] >= RAIN_MAX) return;
     wallet.coins -= item.price;
-    wallet.items[id]++;
+    wallet.items[id] = Math.min(RAIN_KEYS.includes(id) ? RAIN_MAX : 999, wallet.items[id] + 1);
     saveWallet();
-    showToast('已购买「' + item.name + '」，背包：' + wallet.items[id] + ' 张');
+    showToast('已购买「' + item.name + '」，背包：' + wallet.items[id] + ' 个');
     sfx('ui');
   });
 }
+/* ============================ 进阶雨滴（拖拽到植物上） ============================ */
+const RAIN_META = {
+  double: { name: '进阶双雨滴', short: '双', color: '#4bc0a0' },
+  ice:    { name: '进阶冰雨滴', short: '冰', color: '#6cc4e8' },
+  fire:   { name: '进阶火雨滴', short: '火', color: '#f07838' }
+};
+// 只对这里列出的基础植物生效；拖到其它植物/僵尸不会消耗
+const RAIN_TRANSFORMS = {
+  double: { sunflower: 'twinsunflower', peashooter: 'repeater' },
+  ice: {
+    sunflower: 'icesunflower', peashooter: 'snowpea', melonpult: 'wintermelon',
+    wallnut: 'icewallnut', tallnut: 'icetallnut'
+  },
+  fire: {
+    sunflower: 'firesunflower', peashooter: 'firepea', melonpult: 'firemelon',
+    wallnut: 'firewallnut', tallnut: 'firetallnut'
+  }
+};
+const RAIN_PANEL = { x: W - 84, y: GRID_TOP + 8, w: 80, h: 200 };
+function rainRowRect(i) {
+  return { x: RAIN_PANEL.x + 4, y: RAIN_PANEL.y + 27 + i * 57, w: RAIN_PANEL.w - 8, h: 53 };
+}
+function rainTargetAt(pt) {
+  if (pt.y < GRID_TOP || pt.y >= GRID_TOP + CELL_H * ROWS || pt.x < 0 || pt.x >= W) return null;
+  const col = clamp(Math.floor(pt.x / CELL_W), 0, COLS - 1);
+  const row = clamp(Math.floor((pt.y - GRID_TOP) / CELL_H), 0, ROWS - 1);
+  return plantAt(row, col);
+}
+function beginRainDrag(pt) {
+  if (!game.rainTray || !game.started || game.paused || game.over || game.result || game.failVideo || game.screen) return false;
+  if (!inRect(pt, RAIN_PANEL)) return false;
+  for (let i = 0; i < RAIN_KEYS.length; i++) {
+    if (inRect(pt, rainRowRect(i))) {
+      const key = RAIN_KEYS[i];
+      if (wallet.items[key] <= 0) { showToast(RAIN_META[key].name + '数量为 0'); return true; }
+      rainDrag = { key, sx: pt.x, sy: pt.y, active: false };
+      return true;
+    }
+  }
+  return true;  // 点在面板空白处：吞掉这次点击，避免误种植物
+}
+function updateRainDrag(pt) {
+  if (!rainDrag) return;
+  if (!rainDrag.active && Math.hypot(pt.x - rainDrag.sx, pt.y - rainDrag.sy) > 8) rainDrag.active = true;
+}
+function upgradePlant(p, toType) {
+  const t = PLANT_TYPES[toType];
+  p.type = toType;
+  p.maxHp = t.hp;
+  p.hp = t.hp;               // 进阶后恢复满血（坚果类为 1.5 倍血量）
+  p.flash = 0;
+  addParticle(p.x, p.y, 'sunPop');
+  sfx('plant');
+}
+function finishRainDrag(pt) {
+  if (!rainDrag) return false;
+  const drag = rainDrag;
+  rainDrag = null;
+  if (!drag.active) {
+    showToast('按住' + RAIN_META[drag.key].short + '雨滴拖到目标植物上使用');
+    return true;
+  }
+  const p = rainTargetAt(pt);
+  const toType = p ? RAIN_TRANSFORMS[drag.key][p.type] : null;
+  if (!p || !toType) {
+    showToast('这种雨滴不能进阶该目标');
+    return true;
+  }
+  if (wallet.items[drag.key] <= 0) return true;
+  wallet.items[drag.key]--;
+  saveWallet();
+  upgradePlant(p, toType);
+  showToast(PLANT_TYPES[p.type].name + '进阶成功');
+  return true;
+}
+function drawRainTray() {
+  if (!game.rainTray || !game.started || game.over || game.result || game.failVideo) return;
+  ctx.save();
+  ctx.fillStyle = 'rgba(18,22,28,0.90)';
+  rr(RAIN_PANEL.x, RAIN_PANEL.y, RAIN_PANEL.w, RAIN_PANEL.h, 9); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1;
+  rr(RAIN_PANEL.x, RAIN_PANEL.y, RAIN_PANEL.w, RAIN_PANEL.h, 9); ctx.stroke();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+  ctx.fillText('进阶雨滴', RAIN_PANEL.x + RAIN_PANEL.w / 2, RAIN_PANEL.y + 13);
+  for (let i = 0; i < RAIN_KEYS.length; i++) {
+    const key = RAIN_KEYS[i], r = rainRowRect(i), hover = inRect(mouse, r);
+    ctx.fillStyle = hover ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.045)';
+    rr(r.x, r.y, r.w, r.h, 7); ctx.fill();
+    drawItemIcon(key, r.x + 18, r.y + 24, 0.52);
+    ctx.textAlign = 'left'; ctx.fillStyle = wallet.items[key] > 0 ? RAIN_META[key].color : '#666c75';
+    ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+    ctx.fillText(RAIN_META[key].short, r.x + 34, r.y + 18);
+    ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+    ctx.fillText('x' + wallet.items[key], r.x + 34, r.y + 34);
+  }
+  ctx.restore();
+}
+function drawRainDrag() {
+  if (!rainDrag || !rainDrag.active) return;
+  const p = rainTargetAt(mouse);
+  const toType = p ? RAIN_TRANSFORMS[rainDrag.key][p.type] : null;
+  if (toType) {
+    const row = p.row, col = p.col;
+    ctx.fillStyle = 'rgba(143,224,143,0.20)';
+    rr(col * CELL_W + 3, GRID_TOP + row * CELL_H + 3, CELL_W - 6, CELL_H - 6, 8); ctx.fill();
+    ctx.strokeStyle = 'rgba(143,224,143,0.85)'; ctx.lineWidth = 2;
+    rr(col * CELL_W + 3, GRID_TOP + row * CELL_H + 3, CELL_W - 6, CELL_H - 6, 8); ctx.stroke();
+  }
+  ctx.globalAlpha = 0.9;
+  drawItemIcon(rainDrag.key, mouse.x, mouse.y, 0.62);
+  ctx.globalAlpha = 1;
+}
+
 // 清除卡点选模式：红色光环标出所有僵尸
 function drawTargeting() {
   ctx.fillStyle = 'rgba(0,0,0,0.38)'; ctx.fillRect(0, 0, W, H);
@@ -2322,8 +2897,8 @@ function drawDiff() {
   ctx.fillText('无尽模式：波次持续推进，存活越久僵尸越肉越快', W / 2, H - 42);
 }
 
-/* 选卡界面：从全部 14 种植物中挑选最多 10 种出战（中途不可更换），悬停看说明 */
-const PICK_COLS = 7, PICK_W = 96, PICK_H = 80, PICK_GAP = 6;
+/* 选卡界面：从全部 15 种植物中挑选最多 10 种出战（中途不可更换），悬停看说明 */
+const PICK_COLS = 8, PICK_W = 80, PICK_H = 80, PICK_GAP = 4;
 const PICK_X0 = (W - (PICK_COLS * PICK_W + (PICK_COLS - 1) * PICK_GAP)) / 2;
 const PICK_Y0 = GRID_TOP + 58;
 function pickRect(i) {
@@ -2332,7 +2907,7 @@ function pickRect(i) {
 }
 const PICK_CONFIRM = { x: W / 2 - 140, y: H - 92, w: 280, h: 50 };
 const PICK_BACK = { x: 16, y: 16, w: 108, h: 34 };
-// 快速阵容：省去新手在 14 张卡里纠结的时间
+// 快速阵容：省去新手在 15 张卡里纠结的时间
 const PRESET_BEGINNER = ['sunflower', 'peashooter', 'wallnut', 'potatomine', 'snowpea', 'repeater', 'squash', 'cherrybomb', 'melonpult', 'jalapeno'];
 const PRESET_POWER = ['sunflower', 'peashooter', 'repeater', 'snowpea', 'firepea', 'melonpult', 'wintermelon', 'wallnut', 'cherrybomb', 'jalapeno'];
 const PICK_PRESET_A = { x: 121, y: 428, w: 150, h: 36 };
@@ -2347,7 +2922,7 @@ function drawPick() {
   ctx.fillStyle = '#9aa3ad'; ctx.font = '13px "Microsoft YaHei",sans-serif';
   const sub = game.mode === 'level'
     ? ('第 ' + game.level + ' 关 · 目标撑过 ' + game.levelTarget + ' 波')
-    : ('难度：' + game.diff.name);
+    : (game.mode === 'weather' ? ('惊喜天气 · 难度：' + game.diff.name) : ('难度：' + game.diff.name));
   ctx.fillText(sub + ' ｜ 已选 ' + game.pickedPlants.length + ' / 10', W / 2, 60);
   const full = game.pickedPlants.length >= 10;
   for (let i = 0; i < PLANT_ORDER.length; i++) {
@@ -2586,6 +3161,7 @@ function drawToggle(rect, label, on) {
 }
 
 /* 顶部信息条：阳光/卡槽 + 波次进度 + 存活时间 + 道具 / 暂停 / 倍速 / 退出 */
+const RECT_RAIN  = { x: W - 182, y: 10, w: 34, h: 40 };
 const RECT_ITEMS = { x: W - 145, y: 10, w: 34, h: 40 };
 const RECT_PAUSE = { x: W - 108, y: 10, w: 34, h: 40 };
 const RECT_SPEED = { x: W - 71,  y: 10, w: 34, h: 40 };
@@ -2610,12 +3186,23 @@ function drawHUD() {
   ctx.fillStyle = '#9aa3ad'; ctx.font = '12px "Microsoft YaHei",sans-serif';
   const waveLine = game.mode === 'level'
     ? '第 ' + game.level + ' 关 ｜ 波 ' + Math.min(game.wave, game.levelTarget) + '/' + game.levelTarget
-    : (game.mode === 'pie' ? '天上掉馅饼 ｜ 第 ' + game.wave + ' 波' : (game.diff.name + ' ｜ 第 ' + game.wave + ' 波'));
+    : (game.mode === 'pie' ? '天上掉馅饼 ｜ 第 ' + game.wave + ' 波'
+      : (game.mode === 'weather' ? '惊喜天气 ｜ 第 ' + game.wave + ' 波' : (game.diff.name + ' ｜ 第 ' + game.wave + ' 波')));
   ctx.fillText(waveLine, 112, 22);
   ctx.fillText('存活 ' + fmtTime(game.time) + ' ｜ 击杀 ' + game.stats.kills, 112, 42);
+  if (game.mode === 'weather') {
+    ctx.font = 'bold 11px "Microsoft YaHei",sans-serif';
+    if (game.weather) {
+      ctx.fillStyle = WEATHER_COLORS[game.weather.type] || '#ffd23f';
+      ctx.fillText(WEATHER_NAMES[game.weather.type] + ' ' + Math.max(1, Math.ceil(game.weather.timeLeft)) + 's', 112, 55);
+    } else {
+      ctx.fillStyle = '#7f8794';
+      ctx.fillText('下一次天气 ' + Math.max(1, Math.ceil(game.weatherCooldown)) + 's', 112, 55);
+    }
+  }
 
   // 本波进度条（清波比例；大波待发时红色脉动）
-  const bx = 306, by = 24, bw = 252, bh = 8;
+  const bx = 306, by = 24, bw = 220, bh = 8;
   ctx.fillStyle = 'rgba(255,255,255,0.13)'; rr(bx, by, bw, bh, 4); ctx.fill();
   let label = '';
   if (game.bigPending) {
@@ -2631,6 +3218,7 @@ function drawHUD() {
   ctx.textAlign = 'left';
   ctx.fillText(label, bx, by + 20);
 
+  drawMiniButton(RECT_RAIN, '雨滴', game.rainTray ? '#2e7d8a' : '#3f6f9a');
   drawMiniButton(RECT_ITEMS, '道具', '#8a5a2e');
   drawMiniButton(RECT_PAUSE, game.paused ? '继续' : '暂停', game.paused ? '#4f9a43' : '#4a5568');
   drawMiniButton(RECT_SPEED, game.speed + 'x', game.speed > 1 ? '#e0a817' : '#4a5568');
@@ -2642,6 +3230,13 @@ function drawHUD() {
     ctx.fillStyle = '#fff'; ctx.font = 'bold 9px "Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(Math.min(99, itemCount)), RECT_ITEMS.x + RECT_ITEMS.w - 4, RECT_ITEMS.y + 5);
+  }
+  const rainCount = RAIN_KEYS.reduce((n, k) => n + wallet.items[k], 0);
+  if (rainCount > 0) {
+    ctx.fillStyle = '#38c4b0'; ctx.beginPath(); ctx.arc(RECT_RAIN.x + RECT_RAIN.w - 4, RECT_RAIN.y + 4, 7, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 9px "Microsoft YaHei",sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(Math.min(99, rainCount)), RECT_RAIN.x + RECT_RAIN.w - 4, RECT_RAIN.y + 5);
   }
 }
 
@@ -2859,24 +3454,43 @@ function drawPlantArt(type, cx, cy, p, icon, scale) {
   };
   const eye = (x, y, r) => { ctx.fillStyle = '#2c2118'; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
 
-  if (type === 'sunflower') {
+  if (type === 'sunflower' || type === 'twinsunflower' || type === 'icesunflower' || type === 'firesunflower') {
     stem(24, 15);
-    ctx.fillStyle = t.dark;
-    for (let i = 0; i < 12; i++) {
-      const a = i / 12 * TAU;
-      ctx.beginPath(); ctx.ellipse(Math.cos(a) * 14, -5 + Math.sin(a) * 14, 7, 5, a, 0, TAU); ctx.fill();
+    // 单头向日葵画一个头，双头向日葵画左右两个头
+    const heads = type === 'twinsunflower' ? [-10, 10] : [0];
+    const headScale = type === 'twinsunflower' ? 0.82 : 1;
+    for (const hx of heads) {
+      const hy = type === 'twinsunflower' ? -8 : -5;
+      ctx.fillStyle = t.dark;
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * TAU;
+        ctx.beginPath(); ctx.ellipse(hx + Math.cos(a) * 14 * headScale, hy + Math.sin(a) * 14 * headScale, 7 * headScale, 5 * headScale, a, 0, TAU); ctx.fill();
+      }
+      ctx.fillStyle = t.color;
+      ctx.beginPath(); ctx.arc(hx, hy, 11 * headScale, 0, TAU); ctx.fill();
+      ctx.fillStyle = type === 'icesunflower' ? '#6fb6d8' : (type === 'firesunflower' ? '#a84a18' : '#b26a1e');
+      ctx.beginPath(); ctx.arc(hx, hy, 8.5 * headScale, 0, TAU); ctx.fill();
+      ctx.fillStyle = type === 'icesunflower' ? '#dff6ff' : (type === 'firesunflower' ? '#ffd2a0' : '#8a4d12');
+      for (let i = 0; i < 5; i++) {
+        const a = i / 5 * TAU;
+        ctx.beginPath(); ctx.arc(hx + Math.cos(a) * 4.2 * headScale, hy + Math.sin(a) * 4.2 * headScale, 1.3 * headScale, 0, TAU); ctx.fill();
+      }
+      eye(hx - 3.5 * headScale, hy - 3 * headScale, 1.6 * headScale);
+      eye(hx + 3.5 * headScale, hy - 3 * headScale, 1.6 * headScale);
+      ctx.strokeStyle = '#5b3210'; ctx.lineWidth = 1.4 * headScale;
+      ctx.beginPath(); ctx.arc(hx, hy + 2 * headScale, 3.2 * headScale, 0.15, Math.PI - 0.15); ctx.stroke();
     }
-    ctx.fillStyle = t.color;
-    ctx.beginPath(); ctx.arc(0, -5, 11, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#b26a1e'; ctx.beginPath(); ctx.arc(0, -5, 8.5, 0, TAU); ctx.fill();
-    ctx.fillStyle = '#8a4d12';
-    for (let i = 0; i < 5; i++) {
-      const a = i / 5 * TAU;
-      ctx.beginPath(); ctx.arc(Math.cos(a) * 4.2, -5 + Math.sin(a) * 4.2, 1.3, 0, TAU); ctx.fill();
+    // 寒冰 / 火焰向日葵的头顶标记
+    if (type === 'icesunflower') {
+      ctx.fillStyle = '#e8faff';
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath(); ctx.arc(-10 + i * 10, -28 - (i % 2) * 4, 2, 0, TAU); ctx.fill();
+      }
+    } else if (type === 'firesunflower') {
+      ctx.fillStyle = '#ffb03a';
+      ctx.beginPath(); ctx.moveTo(0, -24); ctx.quadraticCurveTo(7, -35, 2, -42);
+      ctx.quadraticCurveTo(-5, -33, -4, -24); ctx.closePath(); ctx.fill();
     }
-    eye(-3.5, -8, 1.6); eye(3.5, -8, 1.6);
-    ctx.strokeStyle = '#5b3210'; ctx.lineWidth = 1.4;
-    ctx.beginPath(); ctx.arc(0, -3, 3.2, 0.15, Math.PI - 0.15); ctx.stroke();
   } else if (type === 'peashooter' || type === 'snowpea' || type === 'firepea' || type === 'repeater') {
     stem(24, 15);
     ctx.fillStyle = t.color;
@@ -2903,10 +3517,10 @@ function drawPlantArt(type, cx, cy, p, icon, scale) {
       ctx.beginPath(); ctx.moveTo(0, -22); ctx.quadraticCurveTo(4, -27, 1, -30);
       ctx.quadraticCurveTo(-1, -26, -4, -23); ctx.closePath(); ctx.fill();
     }
-  } else if (type === 'wallnut') {
+  } else if (type === 'wallnut' || type === 'icewallnut' || type === 'firewallnut') {
     ctx.fillStyle = t.color; rr(-28, -29, 56, 58, 16); ctx.fill();
     ctx.strokeStyle = t.dark; ctx.lineWidth = 2.5; rr(-28, -29, 56, 58, 16); ctx.stroke();
-    ctx.fillStyle = '#7c5834'; rr(-20, -8, 40, 6, 3); ctx.fill();
+    ctx.fillStyle = type === 'icewallnut' ? '#9ad8ee' : (type === 'firewallnut' ? '#b56a32' : '#7c5834'); rr(-20, -8, 40, 6, 3); ctx.fill();
     eye(-10, -16, 3); eye(10, -16, 3);
     ctx.strokeStyle = '#5b3b1c'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, -8, 5, 0.2, Math.PI - 0.2); ctx.stroke();
@@ -2914,13 +3528,27 @@ function drawPlantArt(type, cx, cy, p, icon, scale) {
       ctx.strokeStyle = '#7c5834'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(16, -26); ctx.lineTo(11, -12); ctx.lineTo(17, -5); ctx.lineTo(12, 8); ctx.stroke();
     }
-  } else if (type === 'tallnut') {
+    if (type === 'icewallnut') {
+      ctx.fillStyle = 'rgba(210,245,255,0.8)';
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-16 + i * 16, -25 + (i % 2) * 8, 2, 0, TAU); ctx.fill(); }
+    } else if (type === 'firewallnut') {
+      ctx.fillStyle = '#ffb03a';
+      ctx.beginPath(); ctx.moveTo(0, -30); ctx.quadraticCurveTo(7, -40, 2, -47); ctx.quadraticCurveTo(-5, -38, -4, -30); ctx.closePath(); ctx.fill();
+    }
+  } else if (type === 'tallnut' || type === 'icetallnut' || type === 'firetallnut') {
     ctx.fillStyle = t.color; rr(-20, -40, 40, 78, 13); ctx.fill();
     ctx.strokeStyle = t.dark; ctx.lineWidth = 2.5; rr(-20, -40, 40, 78, 13); ctx.stroke();
-    ctx.fillStyle = '#8a5a2e'; rr(-15, -20, 30, 6, 3); ctx.fill();
+    ctx.fillStyle = type === 'icetallnut' ? '#9ad8ee' : (type === 'firetallnut' ? '#b56a32' : '#8a5a2e'); rr(-15, -20, 30, 6, 3); ctx.fill();
     eye(-9, -28, 3); eye(9, -28, 3);
     ctx.strokeStyle = '#5b3b1c'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(0, -20, 5, 0.2, Math.PI - 0.2); ctx.stroke();
+    if (type === 'icetallnut') {
+      ctx.fillStyle = 'rgba(210,245,255,0.8)';
+      for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(-10 + i * 10, -38 + (i % 2) * 6, 2, 0, TAU); ctx.fill(); }
+    } else if (type === 'firetallnut') {
+      ctx.fillStyle = '#ffb03a';
+      ctx.beginPath(); ctx.moveTo(0, -42); ctx.quadraticCurveTo(7, -52, 2, -60); ctx.quadraticCurveTo(-5, -51, -4, -42); ctx.closePath(); ctx.fill();
+    }
   } else if (type === 'potatomine') {
     ctx.fillStyle = t.color; rr(-22, -8, 44, 30, 14); ctx.fill();
     ctx.fillStyle = '#7a4a22';
@@ -2970,18 +3598,21 @@ function drawPlantArt(type, cx, cy, p, icon, scale) {
       }
       eye(-9, -24, 2);
     }
-  } else if (type === 'melonpult' || type === 'wintermelon') {
+  } else if (type === 'melonpult' || type === 'wintermelon' || type === 'firemelon') {
     ctx.fillStyle = t.dark; rr(-22, 3, 44, 21, 8); ctx.fill();
     ctx.strokeStyle = t.dark; ctx.lineWidth = 5;
     ctx.beginPath(); ctx.moveTo(-12, 6); ctx.lineTo(8, -12); ctx.stroke();
-    ctx.fillStyle = type === 'wintermelon' ? '#6cc4e8' : '#3fae46';
+    ctx.fillStyle = type === 'wintermelon' ? '#6cc4e8' : (type === 'firemelon' ? '#f07838' : '#3fae46');
     ctx.beginPath(); ctx.arc(13, -16, 13, 0, TAU); ctx.fill();
-    ctx.strokeStyle = type === 'wintermelon' ? '#e7f7ff' : '#dff3c8'; ctx.lineWidth = 2;
+    ctx.strokeStyle = type === 'wintermelon' ? '#e7f7ff' : (type === 'firemelon' ? '#ffe0b0' : '#dff3c8'); ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(13, -16, 9, -0.9, 0.9); ctx.stroke();
     ctx.beginPath(); ctx.arc(13, -16, 9, 1.9, 3.2); ctx.stroke();
     if (type === 'wintermelon') {
       ctx.fillStyle = '#e7f7ff';
       ctx.beginPath(); ctx.arc(8, -22, 1.6, 0, TAU); ctx.arc(18, -12, 1.4, 0, TAU); ctx.fill();
+    } else if (type === 'firemelon') {
+      ctx.fillStyle = '#ffd06a';
+      ctx.beginPath(); ctx.arc(8, -22, 1.8, 0, TAU); ctx.arc(18, -12, 1.5, 0, TAU); ctx.fill();
     }
   } else if (type === 'squash') {
     ctx.fillStyle = t.color; ctx.beginPath(); ctx.ellipse(0, 2, 23, 21, 0, 0, TAU); ctx.fill();
@@ -3039,14 +3670,14 @@ function drawPlants() {
   for (const p of game.plants.slice().sort((a, b) => a.row - b.row)) drawPlant(p);
 }
 function drawPlant(p) {
-  const t = PLANT_TYPES[p.type], cx = p.x, cy = p.y;
+  const t = PLANT_TYPES[p.type], cx = p.x + (p.windOffset || 0), cy = p.y;
   drawPlantArt(p.type, cx, cy, p, false, 1);
 
   // 受击白闪（高坚果更高，闪光区加高）
   if (p.flash > 0) {
     ctx.globalAlpha = Math.min(1, p.flash * 8) * 0.8;
     ctx.fillStyle = '#fff';
-    const fh = p.type === 'tallnut' ? 76 : 46;
+    const fh = (p.type === 'tallnut' || p.type === 'icetallnut' || p.type === 'firetallnut') ? 76 : 46;
     rr(cx - 30, cy - fh / 2, 60, fh, 8); ctx.fill();
     ctx.globalAlpha = 1;
   }
@@ -3115,8 +3746,9 @@ function drawZombies() {
 function drawZombie(z, showName) {
   // 巨人放大、小鬼缩小、老师略高；其余普通体型
   const s = z.type === 'gargantuar' ? 1.85 : (z.type === 'imp' ? 0.7 : (z.type === 'teacher' ? 1.12 : 1));
+  const zx = z.x + (z.windOffset || 0);   // 狂风滑动动画的绘制位置
   ctx.save();
-  ctx.translate(z.x, z.y);          // 坐标系平移到僵尸中心
+  ctx.translate(zx, z.y);          // 坐标系平移到僵尸中心
   ctx.scale(s, s);
   const bob = z.eating ? Math.sin(z.bitePhase * 14) * 3 : 0;  // 啃食时脑袋轻晃
   const hx = 0, hy = bob;
@@ -3235,6 +3867,24 @@ function drawZombie(z, showName) {
     ctx.strokeStyle = '#b9b0a0'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(hx - 24, hy + 2); ctx.lineTo(hx - 18, hy + 2); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(hx - 24, hy + 7); ctx.lineTo(hx - 18, hy + 7); ctx.stroke();
+  } else if (z.type === 'thunderteacher') {
+    // 雷电老师：手持引雷针，针尖冒电光
+    ctx.strokeStyle = '#b8c0cc'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hx - 18, hy - 26); ctx.lineTo(hx - 18, hy + 12); ctx.stroke();
+    ctx.fillStyle = '#ffd23f'; ctx.beginPath(); ctx.arc(hx - 18, hy - 27, 5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = 'rgba(160,145,255,0.85)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(hx - 22, hy - 34); ctx.lineTo(hx - 16, hy - 38); ctx.lineTo(hx - 20, hy - 31); ctx.stroke();
+    ctx.fillStyle = '#b9b0a0'; rr(hx - 11, hy - 4, 22, 8, 3); ctx.fill();   // 腰带/工具包
+  } else if (z.type === 'skater') {
+    // 滑冰学生：两个雪橇 + 浅蓝围巾 + 速度线
+    ctx.strokeStyle = '#d8f4ff'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(hx - 22, hy + 33); ctx.lineTo(hx + 10, hy + 33); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hx - 10, hy + 39); ctx.lineTo(hx + 22, hy + 39); ctx.stroke();
+    ctx.fillStyle = '#5fb8e8'; rr(hx - 9, hy - 7, 18, 5, 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(235,250,255,0.65)'; ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath(); ctx.moveTo(hx + 22, hy - 16 + i * 12); ctx.lineTo(hx + 40, hy - 16 + i * 12); ctx.stroke();
+    }
   }
   // 寒冰减速：浑身罩一层浅蓝色冰霜
   if (z.slowTimer > 0) {
@@ -3255,7 +3905,8 @@ function drawZombie(z, showName) {
   if (z.type === 'buddy' && z.pairTone === 0 && z.partner && z.partner.hp > 0) {
     ctx.save();
     ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,220,120,0.35)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(z.x, z.y - 10); ctx.lineTo(z.partner.x, z.partner.y - 10); ctx.stroke();
+    const px = z.partner.x + (z.partner.windOffset || 0);
+    ctx.beginPath(); ctx.moveTo(zx, z.y - 10); ctx.lineTo(px, z.partner.y - 10); ctx.stroke();
     ctx.restore();
   }
 
@@ -3267,17 +3918,17 @@ function drawZombie(z, showName) {
   const barW = big ? 64 : (z.teacher ? 48 : 40);
   if (z.hp < z.maxHp) {
     const frac = z.hp / z.maxHp;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'; rr(z.x - barW / 2, hpY, barW, 5, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; rr(zx - barW / 2, hpY, barW, 5, 2); ctx.fill();
     ctx.fillStyle = frac > 0.5 ? '#58c458' : (frac > 0.25 ? '#ffd23f' : '#ff5555');
-    rr(z.x - barW / 2, hpY, barW * frac, 5, 2); ctx.fill();
+    rr(zx - barW / 2, hpY, barW * frac, 5, 2); ctx.fill();
   }
   if (showName) {
     ctx.font = (big ? 'bold 11px ' : '10px ') + '"Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,0.55)';
-    ctx.strokeText(z.name, z.x, nameY);
+    ctx.strokeText(z.name, zx, nameY);
     ctx.fillStyle = big ? '#ffd9a8' : 'rgba(255,255,255,0.92)';
-    ctx.fillText(z.name, z.x, nameY);
+    ctx.fillText(z.name, zx, nameY);
   }
 }
 
@@ -3290,9 +3941,9 @@ function drawProjectiles() {
       ctx.fillStyle = pr.kind === 'icePea' ? '#4aa7e8' : (pr.kind === 'firePea' ? '#d85f1a' : '#4c8f2c');
       ctx.beginPath(); ctx.arc(pr.x - 2, pr.y - 2, 2, 0, TAU); ctx.fill();
     } else {
-      ctx.fillStyle = pr.kind === 'iceMelon' ? '#6fc6f0' : '#3fae46';
+      ctx.fillStyle = pr.kind === 'iceMelon' ? '#6fc6f0' : (pr.kind === 'fireMelon' ? '#ff8a3a' : '#3fae46');
       ctx.beginPath(); ctx.arc(pr.x, pr.y, 13, 0, TAU); ctx.fill();
-      ctx.strokeStyle = pr.kind === 'iceMelon' ? '#dff1ff' : '#dff3c8'; ctx.lineWidth = 2;
+      ctx.strokeStyle = pr.kind === 'iceMelon' ? '#dff1ff' : (pr.kind === 'fireMelon' ? '#ffe0b0' : '#dff3c8'); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(pr.x, pr.y, 9, -0.8, 0.8); ctx.stroke();
       ctx.beginPath(); ctx.arc(pr.x, pr.y, 9, 1.8, 3.2); ctx.stroke();
     }
@@ -3500,6 +4151,7 @@ function fmtTime(sec) {
 /* ============================ 7. 输入 ============================ */
 let mouse = { x: -999, y: -999 };
 let cardDrag = null;   // 馅饼模式：正在拖拽的天上植物卡 { card, sx, sy, active }
+let rainDrag = null;   // 商店雨滴：正在拖拽的进阶雨滴 { key, sx, sy, active }
 // 屏幕坐标 → 画布逻辑坐标（画布缩放时也能点准）
 function toCanvas(e) {
   const r = canvas.getBoundingClientRect();
@@ -3586,8 +4238,8 @@ function handleCodexClick(pt) {
   if (inRect(pt, CODEX_TAB_PLANT)) { codex.tab = 'plant'; sfx('ui'); return; }
   if (inRect(pt, CODEX_TAB_ZOMBIE)) { codex.tab = 'zombie'; sfx('ui'); return; }
   if (codex.tab === 'plant') {
-    for (let i = 0; i < PLANT_ORDER.length; i++) {
-      if (inRect(pt, codexPlantRect(i))) { codex.plant = PLANT_ORDER[i]; sfx('ui'); return; }
+    for (let i = 0; i < ALL_PLANT_ORDER.length; i++) {
+      if (inRect(pt, codexPlantRect(i))) { codex.plant = ALL_PLANT_ORDER[i]; sfx('ui'); return; }
     }
   } else {
     for (let i = 0; i < ZOMBIE_ORDER.length; i++) {
@@ -3625,7 +4277,10 @@ function handleClick(pt) {
         game.started = true; game.screen = null; game.paused = false;
         resetGame(); sfx('ui'); return;
       }
-      if (inRect(pt, PICK_BACK)) { game.screen = game.mode === 'level' ? 'level' : 'diff'; sfx('ui'); return; }
+      if (inRect(pt, PICK_BACK)) {
+        game.screen = game.mode === 'level' ? 'level' : (game.mode === 'weather' ? 'chaos' : 'diff');
+        sfx('ui'); return;
+      }
       for (let i = 0; i < PLANT_ORDER.length; i++) {
         if (inRect(pt, pickRect(i))) {
           const type = PLANT_ORDER[i], idx = game.pickedPlants.indexOf(type);
@@ -3673,12 +4328,14 @@ function handleClick(pt) {
     }
     if (game.screen === 'chaos') {         // 混沌模式子页面
       if (inRect(pt, CHAOS_PIE)) { startPieMode(); return; }
+      if (inRect(pt, CHAOS_WEATHER)) { startWeatherPick(); return; }
       if (inRect(pt, INTRO_BACK)) { game.screen = 'mode'; sfx('ui'); return; }
       return;
     }
     if (game.screen === 'shop') {          // 良商铺
-      if (inRect(pt, SHOP_BUY_CLEAR)) { buyShopItem('clear'); return; }
-      if (inRect(pt, SHOP_BUY_SNIPE)) { buyShopItem('snipe'); return; }
+      for (const id of ['clear', 'snipe', 'double', 'ice', 'fire']) {
+        if (inRect(pt, SHOP_CARDS[id])) { buyShopItem(id); return; }
+      }
       if (inRect(pt, INTRO_BACK)) { game.screen = 'home'; sfx('ui'); return; }
       return;
     }
@@ -3730,7 +4387,8 @@ function handleClick(pt) {
   }
   if (game.over) { game.overDelay = Math.max(game.overDelay, 1); return; }  // 定格一下，随后进短片
 
-  // 1. 顶部控制按钮（热区外扩 4px，手机上也点得准）
+  // 1. 顶部控制按钮
+  if (inRect(pt, RECT_RAIN)) { game.rainTray = !game.rainTray; sfx('ui'); return; }
   if (inRect(pt, RECT_ITEMS)) { openItems('battle'); sfx('ui'); return; }
   if (inRect(pt, RECT_PAUSE)) { game.paused = true; sfx('ui'); return; }
   if (inRect(pt, RECT_SPEED)) { game.speed = game.speed === 1 ? 2 : 1; saveSettings(); sfx('ui'); return; }
@@ -3849,7 +4507,7 @@ function endlessCoinRate() {
 function pendingCoins() {
   if (!game.started) return 0;
   if (game.mode === 'level') return (game.result && game.result.win) ? (game.level <= 7 ? 2 : 3) : 0;
-  if (game.mode === 'endless' || game.mode === 'pie') return Math.max(0, game.wave - 1) * endlessCoinRate();
+  if (game.mode === 'endless' || game.mode === 'pie' || game.mode === 'weather') return Math.max(0, game.wave - 1) * endlessCoinRate();
   return 0;
 }
 // 结束对局时统一清算金币：对局内不能用本局赚到的金币
@@ -3927,6 +4585,21 @@ function startPieMode() {
   showToast('天上掉馅饼：接住植物卡，守住课本！');
   sfx('ui');
 }
+// 进入惊喜天气：无尽中等底子，先选植物，再进入天气战场
+function startWeatherPick() {
+  game.mode = 'weather';
+  game.diff = DIFFICULTIES.medium;
+  game.level = 1;
+  game.levelTarget = 0;
+  game.pickedPlants = [];
+  game.started = false;
+  game.screen = 'pick';
+  game.paused = false;
+  game.result = null;
+  game.failVideo = null;
+  game.weather = null;
+  sfx('ui');
+}
 // 结算 / 任意处 → 回首页
 function goHome() {
   saveRunIfNeeded();
@@ -3949,29 +4622,34 @@ function showToast(text) { game.toast = { text, ttl: 1.4 }; }
 canvas.addEventListener('mousemove', e => {
   mouse = toCanvas(e);
   if (cardDrag) updateCardDrag(mouse);
+  if (rainDrag) updateRainDrag(mouse);
 });
 canvas.addEventListener('mousedown', e => {
   const pt = toCanvas(e);
   mouse = pt;
+  if (beginRainDrag(pt)) return;   // 雨滴托盘：按在雨滴上开始拖拽
+  if (game.rainTray && !inRect(pt, RAIN_PANEL) && !inRect(pt, RECT_RAIN)) game.rainTray = false;
   if (beginCardDrag(pt)) return;   // 馅饼模式：按在掉落卡上开始拖拽，松开时再判断点击/放置
   handleClick(pt);
 });
 window.addEventListener('mousemove', e => {
-  if (!cardDrag) return;
+  if (!cardDrag && !rainDrag) return;
   mouse = toCanvas(e);
-  updateCardDrag(mouse);
+  if (cardDrag) updateCardDrag(mouse);
+  if (rainDrag) updateRainDrag(mouse);
 });
 window.addEventListener('mouseup', e => {
-  if (!cardDrag) return;
+  if (!cardDrag && !rainDrag) return;
   mouse = toCanvas(e);
-  finishCardDrag(mouse);
+  if (rainDrag) finishRainDrag(mouse);
+  else if (cardDrag) finishCardDrag(mouse);
 });
-window.addEventListener('blur', () => { cardDrag = null; });
+window.addEventListener('blur', () => { cardDrag = null; rainDrag = null; });
 canvas.addEventListener('contextmenu', e => {
   e.preventDefault();
   if (dialog.open) { closeDialog(false); return; }
   if (game.targeting) { game.targeting = false; game.paused = false; showToast('已取消清除卡'); return; }
-  cardDrag = null;
+  cardDrag = null; rainDrag = null; game.rainTray = false;
   game.selected = null; game.pieSelected = null; game.pieShovel = false;   // 右键取消选择
 });
 canvas.addEventListener('touchstart', e => {  // 触摸设备等价点击
@@ -3979,24 +4657,28 @@ canvas.addEventListener('touchstart', e => {  // 触摸设备等价点击
   const t = e.touches[0];
   const pt = toCanvas(t);
   mouse = pt;                                 // 触摸没有 hover，用落点当预览位置
+  if (beginRainDrag(pt)) return;
+  if (game.rainTray && !inRect(pt, RAIN_PANEL) && !inRect(pt, RECT_RAIN)) game.rainTray = false;
   if (beginCardDrag(pt)) return;
   handleClick(pt);
 }, { passive: false });
 window.addEventListener('touchmove', e => {
-  if (!cardDrag) return;
+  if (!cardDrag && !rainDrag) return;
   e.preventDefault();
   const t = e.touches[0];
   mouse = toCanvas(t);
-  updateCardDrag(mouse);
+  if (cardDrag) updateCardDrag(mouse);
+  if (rainDrag) updateRainDrag(mouse);
 }, { passive: false });
 window.addEventListener('touchend', e => {
-  if (!cardDrag) return;
+  if (!cardDrag && !rainDrag) return;
   e.preventDefault();
   const t = e.changedTouches[0];
   if (t) mouse = toCanvas(t);
-  finishCardDrag(mouse);
+  if (rainDrag) finishRainDrag(mouse);
+  else if (cardDrag) finishCardDrag(mouse);
 }, { passive: false });
-window.addEventListener('touchcancel', () => { cardDrag = null; });
+window.addEventListener('touchcancel', () => { cardDrag = null; rainDrag = null; });
 window.addEventListener('keydown', e => {   // 空格暂停 / 1、2 切速度 / R 重开 / Esc 取消
   if (dialog.open) {
     if (e.key === 'Escape') { closeDialog(false); e.preventDefault(); }
@@ -4046,7 +4728,8 @@ window.addEventListener('keydown', e => {   // 空格暂停 / 1、2 切速度 / 
     else if (game.screen !== 'home') goHome();
   }
   if (e.key === 'Escape') {
-    if (cardDrag) { cardDrag = null; e.preventDefault(); return; }
+    if (cardDrag || rainDrag) { cardDrag = null; rainDrag = null; e.preventDefault(); return; }
+    if (game.rainTray) { game.rainTray = false; e.preventDefault(); return; }
     if (game.paused) game.paused = false;
     else { game.selected = null; game.pieSelected = null; game.pieShovel = false; }
   }
@@ -4077,8 +4760,12 @@ function resetGame() {
   game.iceTracks = [];                           // 清空冰道
   game.failVideo = null; game.overDelay = 0; game.result = null; game.newRecord = false; // 清结局短片 / 结算 / 纪录标记
   game.coinsEarned = 0; game.coinsSettled = false; // 新一轮金币清算
-  game.targeting = false; game.itemsReturn = 'battle';
+  game.targeting = false; game.itemsReturn = 'battle'; game.rainTray = false;
   game.pieShovel = false; game.elitePackDone = false;
+  game.weather = null; game.weatherLast = null;
+  game.weatherCooldown = game.mode === 'weather' ? rand(10, 16) : 0;
+  game.lightningFx.length = 0;
+  game.weatherSnowTimer = 0; game.weatherDustTimer = 0;
   if (game.mode === 'pie') {
     // 馅饼模式：没有阳光；初始卡槽数量来自永久钱包，槽里是空的
     game.pieSlots = Array(wallet.slots).fill(null);
