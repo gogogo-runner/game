@@ -340,6 +340,9 @@ const TAU = Math.PI * 2;
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+// 像素渲染：关闭平滑，保证放大后仍是锐利方块；该设置只影响画面，不影响任何游戏逻辑
+ctx.imageSmoothingEnabled = false;
+ctx.imageSmoothingQuality = 'low';
 
 const clamp = (v, a, b) => v < a ? a : (v > b ? b : v);
 const rand  = (a, b) => a + Math.random() * (b - a);
@@ -584,6 +587,8 @@ const Sfx = {
   }
 };
 function sfx(name) {
+  // 新的 SoundManager 负责 8-bit 音色、BGM 与天气环境音；保留原 Sfx 作为兜底
+  if (typeof SoundManager !== 'undefined' && SoundManager.play(name)) return;
   const S = Sfx;
   if (!S.ac || !game.sound) return;
   switch (name) {
@@ -941,11 +946,12 @@ function instantBlast(z, gargDmg, explosive) {
 
 /* ========================== 4. 子弹 / 阳光 / 特效 ========================== */
 // 发射豌豆（直线）：普通 / 冰豌豆（减速）/ 火豌豆（直伤 + 溅射）
-function shootPea(p)     { game.projectiles.push({ kind: 'pea',      row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
-function shootIcePea(p)  { game.projectiles.push({ kind: 'icePea',   row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
-function shootFirePea(p) { game.projectiles.push({ kind: 'firePea',  row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
+function shootPea(p)     { p.pixelShootAt = game.time; game.projectiles.push({ kind: 'pea',      row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shoot'); }
+function shootIcePea(p)  { p.pixelShootAt = game.time; game.projectiles.push({ kind: 'icePea',   row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shootIce'); }
+function shootFirePea(p) { p.pixelShootAt = game.time; game.projectiles.push({ kind: 'firePea',  row: p.row, x: p.x + CELL_W * 0.30, y: p.y - 6, vx: PEA_SPEED }); sfx('shootFire'); }
 // 投掷西瓜（本行抛物线，锁定目标僵尸并逐帧跟踪，必中）；冰瓜 kind='iceMelon'
 function throwMelon(p, tgt, kind) {
+  p.pixelShootAt = game.time;   // 视觉后坐力，不参与弹道计算
   const sx = p.x + CELL_W * 0.26, sy = p.y - 16;
   const d = Math.max(60, Math.hypot(tgt.x - sx, tgt.y - sy));
   // 第一行贴着 HUD，抛物线压低一些，避免西瓜飞到信息条里"消失"
@@ -1040,7 +1046,10 @@ function drawPieCards() {
   }
 }
 // 简单特效：爆炸 / 溅射 / 吞噬 / 僵尸死亡 / 命中 / 跳跃
-function addParticle(x, y, kind) { game.particles.push({ x, y, kind, age: 0 }); }
+function addParticle(x, y, kind) {
+  if (game.particles.length > 180) game.particles.shift();   // 视觉特效上限，避免尸海卡顿
+  game.particles.push({ x, y, kind, age: 0 });
+}
 function durationOf(kind) {
   if (kind === 'explode') return 0.55;
   if (kind === 'melonSplash') return 0.4;
@@ -1071,6 +1080,7 @@ function update(dt) {
   for (let i = game.zombies.length - 1; i >= 0; i--) {
     const z = game.zombies[i];
     if (z.hp <= 0) {
+      if (typeof PixelArt !== 'undefined') PixelArt.spawnDeath(z);   // 纯视觉：倒地 + 书包飞出
       addParticle(z.x, z.y, 'zombieDie');
       sfx('die');
       game.stats.kills++;
@@ -1274,6 +1284,7 @@ function startWeather() {
   }
   game.weather = w;
   game.weatherLast = type;
+  if (typeof SoundManager !== 'undefined') SoundManager.weatherStart(type);
   showToast('天气变化：' + WEATHER_NAMES[type]);
 }
 function endWeather() {
@@ -1491,6 +1502,8 @@ function drawWeather() {
     ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5; ctx.stroke();
     ctx.globalAlpha = 1;
   }
+  // 像素天气粒子（在原有天气 tint 之上，只做视觉叠加）
+  if (typeof PixelArt !== 'undefined') PixelArt.weatherOverlay(w);
   ctx.restore();
 }
 
@@ -1815,6 +1828,8 @@ function updateZombies(dt) {
         if (p && !POLE_BLOCK_TYPES.has(p.type)) {   // 普通坚果可跳过，高坚果/寒冰/火焰坚果挡下
           z.x = p.x - CELL_W * 0.6 - 10;  // 落到该植物左侧
           z.poleActive = false;
+          z.pixelJumpAt = game.time;       // 只驱动腾空像素动画，不改变跳跃判定
+          sfx('poleJump');
           z.speed = game.diff.normalSpeed * z.spdMul;
           z.name = '普通僵尸';
           z.color = ZOMBIE_TYPES.normal.color;
@@ -1833,6 +1848,7 @@ function updateZombies(dt) {
         // 巨人僵尸：直接砸扁碰到的植物（秒杀），砸完停顿一下再走
         if (z.smashTimer <= 0) {
           p.hp = 0;                                 // 砸扁植物
+          z.pixelSmashAt = game.time;               // 只驱动砸击像素动画
           addParticle(p.x, p.y, 'explode');
           sfx('boom');
           z.smashTimer = 1.1;                       // 砸完停顿
@@ -2102,6 +2118,7 @@ const HOME_INTRO = { x: 70,  y: 292, w: 280, h: 52 };
 const HOME_MODE  = { x: 370, y: 292, w: 280, h: 52 };
 const HOME_CODEX = { x: 70,  y: 356, w: 280, h: 52 };
 const HOME_SHOP  = { x: 370, y: 356, w: 280, h: 52 };
+const HOME_VOL   = { x: 22,  y: 22,  w: 48, h: 34 };
 function drawHome() {
   if (updateAvailable) {
     ctx.fillStyle = '#23262c'; ctx.fillRect(0, 0, W, H);
@@ -2118,7 +2135,7 @@ function drawHome() {
   ctx.fillStyle = '#9aa3ad'; ctx.font = '14px "Microsoft YaHei",sans-serif';
   ctx.fillText('偷不到脑子，只好读书长脑子——目标：小屁孩的课本！', W / 2, 140);
   ctx.fillStyle = '#8a929c'; ctx.font = '12px "Microsoft YaHei",sans-serif';
-  ctx.fillText('原型：植物大战僵尸（纯色块改版，无图片无音频文件）', W / 2, 172);
+  ctx.fillText('像素校园改版 ｜ 程序化 8-bit 音效 ｜ 无外部图片/音频文件', W / 2, 172);
   // 历史最佳
   const hasBest = game.best.wave > 1 || game.best.kills > 0;
   ctx.fillStyle = 'rgba(255,255,255,0.05)'; rr(W / 2 - 170, 198, 340, 58, 10); ctx.fill();
@@ -2133,6 +2150,7 @@ function drawHome() {
   drawButton(HOME_MODE, '模式选择', '#e0a817');
   drawButton(HOME_CODEX, '植物 / 僵尸图鉴', '#3f6f9a');
   drawButton(HOME_SHOP, '良商铺', '#8a5a2e');
+  drawMiniButton(HOME_VOL, game.sound ? '音量' : '静音', game.sound ? '#3f7a58' : '#6a4a4a');
   drawHomeScene();
 }
 // 首页底部小剧场：操场、植物、课本和一只想来"借"书的僵尸
@@ -2291,7 +2309,7 @@ function drawCodexPlantCard(type, i) {
   const cx = r.x + r.w / 2;
   ctx.fillStyle = 'rgba(0,0,0,0.20)';
   ctx.beginPath(); ctx.arc(cx, r.y + 25, 18, 0, TAU); ctx.fill();
-  drawPlantIcon(type, cx, r.y + 26, 0.42);
+  drawPlantIcon(type, cx, r.y + 26, 0.72);
   ctx.fillStyle = '#e8e8e8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(t.name, cx, r.y + 49);
@@ -2309,7 +2327,7 @@ function drawCodexZombieCard(type, i) {
   ctx.lineWidth = selected ? 2.5 : 1;
   rr(r.x, r.y, r.w, r.h, 8); ctx.stroke();
   const cx = r.x + r.w / 2;
-  const iconScale = type === 'gargantuar' ? 0.34 : (type === 'imp' ? 0.82 : (type === 'teacher' ? 0.7 : 0.68));
+  const iconScale = type === 'gargantuar' ? 0.48 : (type === 'imp' ? 0.88 : (type === 'teacher' ? 0.78 : 0.82));
   ctx.fillStyle = 'rgba(0,0,0,0.20)';
   ctx.beginPath(); ctx.arc(cx, r.y + 24, 17, 0, TAU); ctx.fill();
   drawZombieIcon(type, cx, r.y + 27, iconScale);
@@ -2725,7 +2743,7 @@ function beginRainDrag(pt) {
   for (let i = 0; i < RAIN_KEYS.length; i++) {
     if (inRect(pt, rainRowRect(i))) {
       const key = RAIN_KEYS[i];
-      if (wallet.items[key] <= 0) { showToast(RAIN_META[key].name + '数量为 0'); return true; }
+      if (wallet.items[key] <= 0) { SoundManager.play('upgradeFail'); return true; }
       rainDrag = { key, sx: pt.x, sy: pt.y, active: false };
       return true;
     }
@@ -2734,7 +2752,10 @@ function beginRainDrag(pt) {
 }
 function updateRainDrag(pt) {
   if (!rainDrag) return;
-  if (!rainDrag.active && Math.hypot(pt.x - rainDrag.sx, pt.y - rainDrag.sy) > 8) rainDrag.active = true;
+  if (!rainDrag.active && Math.hypot(pt.x - rainDrag.sx, pt.y - rainDrag.sy) > 8) {
+    rainDrag.active = true;
+    SoundManager.play('rainSlide');
+  }
 }
 function upgradePlant(p, toType) {
   const t = PLANT_TYPES[toType];
@@ -2742,28 +2763,29 @@ function upgradePlant(p, toType) {
   p.maxHp = t.hp;
   p.hp = t.hp;               // 进阶后恢复满血（坚果类为 1.5 倍血量）
   p.flash = 0;
-  addParticle(p.x, p.y, 'sunPop');
-  sfx('plant');
+  p.pixelUpgradeAt = game.time;   // 只驱动星光/闪光，不参与数值
 }
 function finishRainDrag(pt) {
   if (!rainDrag) return false;
   const drag = rainDrag;
   rainDrag = null;
   if (!drag.active) {
-    showToast('按住' + RAIN_META[drag.key].short + '雨滴拖到目标植物上使用');
+    SoundManager.play('ui');
     return true;
   }
   const p = rainTargetAt(pt);
   const toType = p ? RAIN_TRANSFORMS[drag.key][p.type] : null;
   if (!p || !toType) {
-    showToast('这种雨滴不能进阶该目标');
+    if (p) PixelArt.shakePlant(p);
+    SoundManager.play('upgradeFail');
     return true;
   }
   if (wallet.items[drag.key] <= 0) return true;
   wallet.items[drag.key]--;
   saveWallet();
   upgradePlant(p, toType);
-  showToast(PLANT_TYPES[p.type].name + '进阶成功');
+  PixelArt.rainSuccess(p);
+  SoundManager.play('upgradeSuccess');
   return true;
 }
 function drawRainTray() {
@@ -2939,7 +2961,7 @@ function drawPick() {
     rr(r.x, r.y, r.w, r.h, 8); ctx.stroke();
     ctx.fillStyle = 'rgba(0,0,0,0.20)';
     ctx.beginPath(); ctx.arc(r.x + r.w / 2, r.y + 26, 20, 0, TAU); ctx.fill();
-    drawPlantIcon(type, r.x + r.w / 2, r.y + 26, 0.54);
+    drawPlantIcon(type, r.x + r.w / 2, r.y + 26, 0.72);
     ctx.fillStyle = '#e8e8e8'; ctx.font = '12px "Microsoft YaHei",sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(t.name, r.x + r.w / 2, r.y + 50);
@@ -2998,6 +3020,8 @@ function drawPick() {
 // 背景：校园操场跑道 + 顶部教学楼 + 顶部黑板 HUD + 底部课桌选卡栏
 // 说明：原来的草坪棋盘格替换为红褐色塑胶跑道；每一行是一条跑道分道。
 function drawBackground() {
+  // 视觉层：像素校园背景（只替换绘制，不改变任何关卡/网格逻辑）
+  if (PixelArt.enabled) { PixelArt.background(); return; }
   ctx.fillStyle = '#23262c';
   ctx.fillRect(0, 0, W, H);
   // 操场跑道：红褐色交替色块
@@ -3161,11 +3185,12 @@ function drawToggle(rect, label, on) {
 }
 
 /* 顶部信息条：阳光/卡槽 + 波次进度 + 存活时间 + 道具 / 暂停 / 倍速 / 退出 */
-const RECT_RAIN  = { x: W - 182, y: 10, w: 34, h: 40 };
-const RECT_ITEMS = { x: W - 145, y: 10, w: 34, h: 40 };
-const RECT_PAUSE = { x: W - 108, y: 10, w: 34, h: 40 };
-const RECT_SPEED = { x: W - 71,  y: 10, w: 34, h: 40 };
-const RECT_EXIT  = { x: W - 34,  y: 10, w: 34, h: 40 };
+const RECT_RAIN  = { x: W - 190, y: 10, w: 30, h: 40 };
+const RECT_ITEMS = { x: W - 158, y: 10, w: 30, h: 40 };
+const RECT_PAUSE = { x: W - 126, y: 10, w: 30, h: 40 };
+const RECT_SPEED = { x: W - 94,  y: 10, w: 30, h: 40 };
+const RECT_VOL   = { x: W - 62,  y: 10, w: 30, h: 40 };
+const RECT_EXIT  = { x: W - 30,  y: 10, w: 30, h: 40 };
 function drawHUD() {
   if (game.mode === 'pie') {
     // 馅饼模式没有阳光：显示卡槽占用数量
@@ -3202,7 +3227,7 @@ function drawHUD() {
   }
 
   // 本波进度条（清波比例；大波待发时红色脉动）
-  const bx = 306, by = 24, bw = 220, bh = 8;
+  const bx = 306, by = 24, bw = 210, bh = 8;
   ctx.fillStyle = 'rgba(255,255,255,0.13)'; rr(bx, by, bw, bh, 4); ctx.fill();
   let label = '';
   if (game.bigPending) {
@@ -3222,6 +3247,7 @@ function drawHUD() {
   drawMiniButton(RECT_ITEMS, '道具', '#8a5a2e');
   drawMiniButton(RECT_PAUSE, game.paused ? '继续' : '暂停', game.paused ? '#4f9a43' : '#4a5568');
   drawMiniButton(RECT_SPEED, game.speed + 'x', game.speed > 1 ? '#e0a817' : '#4a5568');
+  drawMiniButton(RECT_VOL, game.sound ? '音量' : '静音', game.sound ? '#3f7a58' : '#6a4a4a');
   drawMiniButton(RECT_EXIT, '退出', '#7a4a4a');
   // 道具数量角标
   const itemCount = wallet.items.clear + wallet.items.snipe;
@@ -3272,7 +3298,7 @@ function drawPlantBar() {
       // 植物小像：和操场上的造型一致，方便快速辨认
       ctx.fillStyle = 'rgba(0,0,0,0.20)';
       ctx.beginPath(); ctx.arc(x + CARD_W / 2, y + 30, 19, 0, TAU); ctx.fill();
-      drawPlantIcon(type, x + CARD_W / 2, y + 31, 0.55);
+      drawPlantIcon(type, x + CARD_W / 2, y + 31, 0.70);
     }
     // 名字
     ctx.fillStyle = '#e8e8e8'; ctx.font = '11px "Microsoft YaHei",sans-serif';
@@ -3329,7 +3355,7 @@ function drawPieBar() {
     if (type) {
       ctx.fillStyle = 'rgba(0,0,0,0.20)';
       ctx.beginPath(); ctx.arc(r.x + r.w / 2, r.y + 30, 19, 0, TAU); ctx.fill();
-      drawPlantIcon(type, r.x + r.w / 2, r.y + 31, 0.55);
+      drawPlantIcon(type, r.x + r.w / 2, r.y + 31, 0.70);
       ctx.fillStyle = '#e8e8e8'; ctx.font = '10px "Microsoft YaHei",sans-serif';
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(PLANT_TYPES[type].name, r.x + r.w / 2, r.y + 56);
@@ -3438,6 +3464,8 @@ function drawPlantIcon(type, cx, cy, scale) {
   drawPlantArt(type, cx, cy, PLANT_ICON_STATE, true, scale);
 }
 function drawPlantArt(type, cx, cy, p, icon, scale) {
+  // 视觉层：32×32 像素植物；只替换外观，攻击/阳光/血量等逻辑完全不动
+  if (PixelArt.enabled) { PixelArt.plant(type, cx, cy, p, icon, scale); return; }
   const t = PLANT_TYPES[type];
   ctx.save();
   ctx.translate(cx, cy);
@@ -3673,20 +3701,19 @@ function drawPlant(p) {
   const t = PLANT_TYPES[p.type], cx = p.x + (p.windOffset || 0), cy = p.y;
   drawPlantArt(p.type, cx, cy, p, false, 1);
 
-  // 受击白闪（高坚果更高，闪光区加高）
+  // 受击白闪（像素植物统一 32×32 区域）
   if (p.flash > 0) {
     ctx.globalAlpha = Math.min(1, p.flash * 8) * 0.8;
     ctx.fillStyle = '#fff';
-    const fh = (p.type === 'tallnut' || p.type === 'icetallnut' || p.type === 'firetallnut') ? 76 : 46;
-    rr(cx - 30, cy - fh / 2, 60, fh, 8); ctx.fill();
+    rr(cx - 18, cy - 18, 36, 36, 4); ctx.fill();
     ctx.globalAlpha = 1;
   }
   // 受伤血条
   if (p.hp < p.maxHp) {
     const frac = p.hp / p.maxHp;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(cx - 20, cy - 42, 40, 5, 2); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; rr(cx - 15, cy - 24, 30, 4, 2); ctx.fill();
     ctx.fillStyle = frac > 0.5 ? '#58c458' : (frac > 0.25 ? '#ffd23f' : '#ff5555');
-    rr(cx - 20, cy - 42, 40 * frac, 5, 2); ctx.fill();
+    rr(cx - 15, cy - 24, 30 * frac, 4, 2); ctx.fill();
   }
   // 名字
   ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.font = '11px "Microsoft YaHei",sans-serif';
@@ -3744,6 +3771,8 @@ function drawZombies() {
   for (const z of list) drawZombie(z, front.get(z.row) === z && z.type !== 'gargantuar');
 }
 function drawZombie(z, showName) {
+  // 视觉层：24×40 / 撑杆 32×40 / 巨人 40×56 的像素学生僵尸
+  if (PixelArt.enabled) { PixelArt.zombie(z, showName); return; }
   // 巨人放大、小鬼缩小、老师略高；其余普通体型
   const s = z.type === 'gargantuar' ? 1.85 : (z.type === 'imp' ? 0.7 : (z.type === 'teacher' ? 1.12 : 1));
   const zx = z.x + (z.windOffset || 0);   // 狂风滑动动画的绘制位置
@@ -3934,6 +3963,7 @@ function drawZombie(z, showName) {
 
 // 子弹：豌豆（普通绿 / 冰蓝 / 火橙）、西瓜（绿球 / 冰蓝球 + 条纹）
 function drawProjectiles() {
+  if (PixelArt.enabled) { PixelArt.projectiles(); return; }
   for (const pr of game.projectiles) {
     if (pr.kind === 'pea' || pr.kind === 'icePea' || pr.kind === 'firePea') {
       ctx.fillStyle = pr.kind === 'icePea' ? '#7fd0ff' : (pr.kind === 'firePea' ? '#ff8c3a' : '#7ecb3f');
@@ -3961,6 +3991,7 @@ function drawSuns(flying) {
 }
 // 特效（纯色块：爆炸圈、溅射点、吞噬、死亡收缩等）
 function drawParticles() {
+  if (PixelArt.enabled) { PixelArt.effects(); return; }
   for (const pa of game.particles) {
     const f = pa.age / durationOf(pa.kind);
     ctx.globalAlpha = 1 - f;
@@ -4348,6 +4379,12 @@ function handleClick(pt) {
     if (inRect(pt, HOME_MODE)) { game.screen = 'mode'; sfx('ui'); return; }
     if (inRect(pt, HOME_CODEX)) { openCodex('home'); return; }
     if (inRect(pt, HOME_SHOP)) { game.screen = 'shop'; sfx('ui'); return; }
+    if (inRect(pt, HOME_VOL)) {
+      game.sound = !game.sound;
+      if (game.sound) Sfx.init();
+      SoundManager.setEnabled(game.sound);
+      saveSettings(); sfx('ui'); return;
+    }
     return;
   }
 
@@ -4382,7 +4419,12 @@ function handleClick(pt) {
     if (inRect(pt, PAUSE_CODEX)) { openCodex('pause'); return; }
     if (inRect(pt, PAUSE_ITEMS)) { openItems('pause'); return; }
     if (inRect(pt, PAUSE_AUTO) && game.mode !== 'pie') { game.autoSun = !game.autoSun; saveSettings(); sfx('ui'); return; }
-    if (inRect(pt, PAUSE_SOUND)) { game.sound = !game.sound; if (game.sound) Sfx.init(); saveSettings(); sfx('ui'); return; }
+    if (inRect(pt, PAUSE_SOUND)) {
+      game.sound = !game.sound;
+      if (game.sound) Sfx.init();
+      if (typeof SoundManager !== 'undefined') SoundManager.setEnabled(game.sound);
+      saveSettings(); sfx('ui'); return;
+    }
     return;
   }
   if (game.over) { game.overDelay = Math.max(game.overDelay, 1); return; }  // 定格一下，随后进短片
@@ -4392,6 +4434,12 @@ function handleClick(pt) {
   if (inRect(pt, RECT_ITEMS)) { openItems('battle'); sfx('ui'); return; }
   if (inRect(pt, RECT_PAUSE)) { game.paused = true; sfx('ui'); return; }
   if (inRect(pt, RECT_SPEED)) { game.speed = game.speed === 1 ? 2 : 1; saveSettings(); sfx('ui'); return; }
+  if (inRect(pt, RECT_VOL)) {
+    game.sound = !game.sound;
+    if (game.sound) Sfx.init();
+    if (typeof SoundManager !== 'undefined') SoundManager.setEnabled(game.sound);
+    saveSettings(); sfx('ui'); return;
+  }
   if (inRect(pt, RECT_EXIT)) {          // 退出本局 → 回到选卡/混沌页
     backToPick();
     sfx('ui');
@@ -4765,6 +4813,7 @@ function resetGame() {
   game.weather = null; game.weatherLast = null;
   game.weatherCooldown = game.mode === 'weather' ? rand(10, 16) : 0;
   game.lightningFx.length = 0;
+  if (typeof PixelArt !== 'undefined') { PixelArt.deaths.length = 0; PixelArt.stars.length = 0; }
   game.weatherSnowTimer = 0; game.weatherDustTimer = 0;
   if (game.mode === 'pie') {
     // 馅饼模式：没有阳光；初始卡槽数量来自永久钱包，槽里是空的
@@ -4780,7 +4829,714 @@ function resetGame() {
   }
 }
 
-// 统一游戏循环：requestAnimationFrame 驱动，dt 防跳变；2 倍速 = 同一帧跑两次 update（避免大步穿透）
+/* ============================ 像素渲染模块（纯视觉，不改变任何判定） ============================ */
+/* 约束：植物 32×32；普通僵尸 24×40；撑杆 32×40；巨人 40×56；子弹 6~16px。
+ * 这里只接管 drawBackground / drawPlantArt / drawZombie / drawProjectiles / drawParticles 的“画什么”，
+ * 不修改移动、攻击、血量、阳光、天气、雨滴进阶等任何业务逻辑。 */
+const PixelArt = {
+  enabled: true,
+  stars: [],
+  deaths: [],
+
+  // 低分辨率像素块：所有造型都由 fillRect 组成，放大后保持锐利
+  background() {
+    const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+    const top = GRID_TOP, bottom = H - BAR_H;
+    R(0, 0, W, H, '#1a2024');
+    // 操场草坪：低饱和像素棋盘 + 跑道红边
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        R(c * CELL_W, top + r * CELL_H, CELL_W, CELL_H, (r + c) % 2 ? '#4c5b49' : '#53634e');
+      }
+    }
+    R(0, top, 5, bottom - top, '#8c5b4a');
+    R(W - 5, top, 5, bottom - top, '#8c5b4a');
+    R(0, top + 4, W, 3, 'rgba(255,255,255,0.08)');
+    // 草坪像素草簇：固定伪随机位置，不闪烁，也不会排成一条斜线
+    for (let i = 0; i < 90; i++) {
+      const h1 = Math.sin(i * 12.9898 + 3.1) * 43758.5453;
+      const h2 = Math.sin(i * 78.233 + 7.7) * 43758.5453;
+      const x = Math.floor((h1 - Math.floor(h1)) * W);
+      const y = top + 10 + Math.floor((h2 - Math.floor(h2)) * (bottom - top - 20));
+      R(x, y, 2, 4, i % 3 ? '#3b4b3a' : '#6a7a5c');
+      R(x + 2, y + 1, 2, 3, '#3b4b3a');
+    }
+    // 远景教学楼：屋顶 / 楼体 / 暖色窗格 / 校牌
+    R(0, top, W, 6, '#6e3c32');
+    R(0, top + 6, W, 34, '#46535b');
+    for (let x = 18; x < W - 24; x += 74) {
+      R(x, top + 14, 30, 12, '#d6b36a');
+      R(x + 14, top + 14, 2, 12, '#3f4a50');
+      R(x, top + 14, 30, 2, '#8d744e');
+    }
+    R(W / 2 - 84, top + 22, 168, 20, '#2f3a3e');
+    R(W / 2 - 84, top + 22, 168, 2, '#a27b4e');
+    // 远处校门剪影
+    R(26, top + 22, 4, 18, '#2f3a3e'); R(58, top + 22, 4, 18, '#2f3a3e');
+    R(20, top + 18, 48, 4, '#2f3a3e');
+    // 跑道中央的像素圆环
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,240,200,0.08)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(W / 2, top + CELL_H * ROWS / 2, 72, 0, TAU); ctx.stroke();
+    ctx.restore();
+    // 底部课桌木纹
+    R(0, H - BAR_H, W, BAR_H, '#352b20');
+    R(0, H - BAR_H, W, 5, '#5c4730');
+    for (let x = 0; x < W; x += 32) R(x, H - BAR_H + 5, 1, BAR_H - 5, 'rgba(255,255,255,0.035)');
+    // 顶部黑板
+    R(0, 0, W, GRID_TOP, '#24332d');
+    R(0, GRID_TOP - 4, W, 4, '#6b4a2f');
+  },
+
+  plant(type, cx, cy, p, icon, scale) {
+    const t = PLANT_TYPES[type];
+    if (!t) return;
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (scale && scale !== 1) ctx.scale(scale, scale);
+    const flash = !!(p && p.flash > 0);
+    const C = c => flash ? '#ffffff' : c;
+    const f = Math.floor(game.time * 8);
+    const sway = icon ? 0 : Math.round(Math.sin(game.time * 2 + ((p && p.x) || 0) * 0.04));
+    const shake = (!icon && p && p.pixelShakeUntil > game.time) ? (f % 2 ? 1 : -1) : 0;
+    ctx.translate(sway + shake, 0);
+    const R = (x, y, w, h, c) => { ctx.fillStyle = C(c); ctx.fillRect(x, y, w, h); };
+    // 柔和像素阴影
+    R(-13, 15, 26, 3, 'rgba(0,0,0,0.16)');
+    const stem = () => {
+      R(-1, 2, 3, 13, '#3f8f36');
+      R(-8, 10, 7, 3, '#4fae4a');
+      R(2, 13, 7, 3, '#4fae4a');
+    };
+    const face = (x, y, eyeC) => {
+      R(x - 4, y - 2, 2, 2, eyeC || '#30241a');
+      R(x + 3, y - 2, 2, 2, eyeC || '#30241a');
+      R(x - 2, y + 2, 4, 1, '#5b3210');
+    };
+    const shootAge = p && p.pixelShootAt != null ? game.time - p.pixelShootAt : 9;
+    const recoil = shootAge < 0.12 ? -2 : 0;
+
+    if (type === 'sunflower' || type === 'twinsunflower' || type === 'icesunflower' || type === 'firesunflower') {
+      stem();
+      const flower = (hx, hy, hs) => {
+        for (let i = 0; i < 8; i++) {
+          const a = i / 8 * TAU;
+          const px = Math.round(Math.cos(a) * 9 * hs), py = Math.round(Math.sin(a) * 9 * hs);
+          R(hx + px - 2 * hs, hy + py - 2 * hs, 4 * hs, 4 * hs, t.dark);
+        }
+        R(hx - 5 * hs, hy - 5 * hs, 10 * hs, 10 * hs, t.color);
+        const center = type === 'icesunflower' ? '#6fb6d8' : (type === 'firesunflower' ? '#a84a18' : '#b26a1e');
+        R(hx - 4 * hs, hy - 4 * hs, 8 * hs, 8 * hs, center);
+        R(hx - 3 * hs, hy - 1 * hs, 1.5 * hs, 1.5 * hs, '#30241a');
+        R(hx + 2 * hs, hy - 1 * hs, 1.5 * hs, 1.5 * hs, '#30241a');
+        R(hx - 2 * hs, hy + 2 * hs, 4 * hs, 1 * hs, '#5b3210');
+      };
+      if (type === 'twinsunflower') {
+        flower(-7, -8, 0.66); flower(7, -8, 0.66);
+      } else {
+        flower(0, -5, 1);
+      }
+      if (type === 'icesunflower') {
+        R(-13, -16, 3, 3, '#dff8ff'); R(-4, -16, 2, 2, '#bdefff'); R(10, -14, 2, 2, '#dff8ff');
+      } else if (type === 'firesunflower') {
+        R(-3, -16, 2, 5, '#ffb03a'); R(0, -16, 2, 6, '#ff7a2a');
+        if (f % 2) R(-6, -14, 2, 3, '#ffd06a');
+      }
+    } else if (type === 'peashooter' || type === 'repeater' || type === 'snowpea' || type === 'firepea') {
+      stem();
+      R(-8, -7, 14, 15, t.color);
+      R(-9, -8, 4, 5, t.dark);
+      R(5 + recoil, -6, 10, 7, t.dark);
+      R(6 + recoil, -5, 8, 2, t.color);
+      R(14 + recoil, -4, 2, 3, '#1e3d1e');
+      if (p && p.timer != null && p.timer < 0.22) R(14 + recoil, -6, 3, 3, '#fff0a0');
+      R(-4, -5, 2, 2, '#2c2118'); R(1, -5, 2, 2, '#2c2118');
+      R(-3, -1, 6, 1, '#2c2118');
+      if (type === 'repeater') {
+        R(5 + recoil, 2, 10, 6, t.dark); R(13 + recoil, 3, 2, 3, '#1e3d1e');
+      }
+      if (type === 'snowpea') {
+        R(4 + recoil, -9, 2, 2, '#e6fbff'); R(15 + recoil, -8, 2, 2, '#e6fbff');
+        R(4 + recoil, 3, 2, 2, '#bdefff'); R(15 + recoil, 3, 2, 2, '#e6fbff');
+      } else if (type === 'firepea') {
+        R(7 + recoil, -11, 3, 5, '#ffb03a'); R(10 + recoil, -13, 2, 5, '#ff6a1a');
+        if (f % 2) R(4 + recoil, -10, 2, 4, '#ffd06a');
+      }
+    } else if (type === 'wallnut' || type === 'tallnut' || type === 'icewallnut' || type === 'icetallnut' || type === 'firewallnut' || type === 'firetallnut') {
+      const tall = type === 'tallnut' || type === 'icetallnut' || type === 'firetallnut';
+      const body = t.color;
+      if (tall) {
+        R(-9, -15, 18, 31, body); R(-11, -8, 2, 20, t.dark); R(9, -6, 2, 18, t.dark);
+        R(-9, -15, 18, 3, t.dark); R(-6, -3, 12, 3, t.dark);
+      } else {
+        R(-12, -11, 24, 25, body); R(-13, -6, 2, 16, t.dark); R(11, -4, 2, 14, t.dark);
+        R(-9, -3, 18, 3, t.dark);
+      }
+      const fy = tall ? -7 : -4;
+      R(-6, fy - 2, 2, 2, '#30241a'); R(4, fy - 2, 2, 2, '#30241a');
+      R(-3, fy + 4, 6, 1, '#5b3b1c');
+      if (p && p.hp < p.maxHp * 0.55) { R(6, fy - 7, 2, 5, '#5b3b1c'); R(8, fy - 2, 2, 4, '#5b3b1c'); }
+      if (type.includes('ice')) {
+        R(-13, -14, 3, 3, '#e6fbff'); R(9, -12, 2, 2, '#bdefff'); R(-11, 5, 2, 2, '#e6fbff');
+      } else if (type.includes('fire')) {
+        R(-2, -16, 3, 5, '#ffb03a'); R(2, -14, 2, 4, '#ff6a1a');
+      }
+    } else if (type === 'potatomine') {
+      R(-12, 2, 24, 13, t.color); R(-10, 3, 20, 3, t.dark);
+      R(-10, 7, 2, 2, '#7a4a22'); R(5, 9, 2, 2, '#7a4a22');
+      R(6, 1, 2, 7, '#5b3b1c'); R(8, -4, 6, 3, '#ffd23f');
+      if (p && p.armed) { R(-3, -2, 2, 2, '#ff5533'); R(1, -2, 2, 2, '#ff5533'); }
+    } else if (type === 'chomper') {
+      stem();
+      R(-9, -10, 18, 18, t.color); R(-12, -9, 3, 8, t.dark);
+      R(-3, -7, 10, 4, '#7a161c');
+      R(-1, -7, 2, 2, '#fff'); R(4, -7, 2, 2, '#fff');
+      if (p && p.chewing) { R(2, -13, 6, 5, '#7a161c'); R(2, -13, 6, 2, '#e6484d'); }
+    } else if (type === 'melonpult' || type === 'wintermelon' || type === 'firemelon') {
+      R(-14, 7, 28, 8, t.dark); R(-10, 5, 2, 4, '#5b3b1c');
+      const mc = type === 'wintermelon' ? '#6cc4e8' : (type === 'firemelon' ? '#f07838' : '#3fae46');
+      const md = type === 'wintermelon' ? '#e7f7ff' : (type === 'firemelon' ? '#ffe0b0' : '#dff3c8');
+      R(2, -12, 13, 13, mc); R(4, -14, 9, 3, md); R(3, -5, 3, 3, md);
+      R(-10, 1, 2, 4, '#5b3b1c'); R(-8, -2, 8, 3, t.dark);
+    } else if (type === 'squash') {
+      R(-11, -8, 22, 21, t.color); R(-13, -3, 2, 13, t.dark); R(11, 0, 2, 10, t.dark);
+      R(-6, -3, 2, 2, '#2c2118'); R(4, -3, 2, 2, '#2c2118');
+      R(-2, 4, 5, 1, '#2c5c28'); R(-2, -12, 4, 4, '#2e7d32');
+    } else if (type === 'jalapeno') {
+      R(-6, -11, 13, 20, t.color); R(-9, -3, 3, 10, t.dark); R(-6, -14, 8, 4, '#2e7d32');
+      R(-5, -8, 2, 2, '#fff'); R(1, -8, 2, 2, '#fff');
+      if (p && p.fuse > 0) { R(-3, -16, 2, 4, '#ffd23f'); R(0, -16, 2, 4, '#ff8a3a'); }
+    } else if (type === 'cherrybomb') {
+      R(-10, -7, 10, 14, t.color); R(1, -4, 10, 14, t.dark);
+      R(-7, -9, 4, 2, '#2e7d32'); R(3, -6, 4, 2, '#2e7d32');
+      R(-7, -2, 2, 2, '#fff'); R(5, 1, 2, 2, '#fff');
+    } else {
+      // 兜底：保持 32×32 的像素盆栽
+      stem(); R(-7, -9, 14, 12, t.dark); R(-4, -6, 8, 7, t.color);
+    }
+    ctx.restore();
+  },
+
+  zombie(z, showName) {
+    const isGarg = z.type === 'gargantuar';
+    const isPole = z.type === 'pole';
+    const isImp = z.type === 'imp';
+    const bw = isGarg ? 40 : (isPole ? 32 : (isImp ? 20 : 24));
+    const bh = isGarg ? 56 : (isImp ? 32 : 40);
+    const zx = z.x + (z.windOffset || 0);
+    const flash = z.flash > 0;
+    const C = c => flash ? '#ffffff' : c;
+    const f = Math.floor(game.time * 7 + Math.abs(z.x) * 0.03);
+    const walk = z.eating ? 0 : (f % 2 ? 1 : -1);
+    const bob = z.eating ? 2 : (f % 2 ? 0 : 1);
+    const jumpAge = z.pixelJumpAt != null ? game.time - z.pixelJumpAt : 9;
+    const air = isPole && jumpAge < 0.45 ? 10 : 0;
+    const smashAge = z.pixelSmashAt != null ? game.time - z.pixelSmashAt : 9;
+    const skin = C(z.color || '#9aa97b');
+    const uniform = C('#4f6a86');
+    const pants = C('#34405a');
+    const cap = C('#b84a3a');
+    const bag = C('#8a5a32');
+    const dark = C('#2c343a');
+    const top = -bh / 2, bottom = bh / 2;
+    ctx.save();
+    ctx.translate(zx, z.y - air);
+    if (isPole && z.poleActive) ctx.rotate(-0.07);   // 助跑前倾，只是视觉
+    // 脚步音效：只做音频反馈，不改变移动速度
+    if (typeof SoundManager !== 'undefined') SoundManager.footstep(z);
+    // 地面阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(-bw / 2 + 2, bottom - 2, bw - 4, 3);
+    // 腿 / 校裤
+    const legY = bottom - 11;
+    ctx.fillStyle = pants;
+    ctx.fillRect(-bw * 0.22 + walk * 2, legY, 5, 11);
+    ctx.fillRect(bw * 0.10 - walk * 2, legY, 5, 11);
+    ctx.fillStyle = C('#202830');
+    ctx.fillRect(-bw * 0.25 + walk * 2, bottom - 2, 7, 3);
+    ctx.fillRect(bw * 0.08 - walk * 2, bottom - 2, 7, 3);
+    // 身体：破旧校服 + 领带
+    const bodyY = top + (isGarg ? 20 : 14) + bob;
+    ctx.fillStyle = uniform;
+    ctx.fillRect(-bw * 0.30, bodyY, bw * 0.60, bh * 0.42);
+    ctx.fillStyle = C('#3c5169');
+    ctx.fillRect(-bw * 0.30, bodyY, bw * 0.60, 3);
+    ctx.fillStyle = C('#d0a03a');
+    ctx.fillRect(-1, bodyY + 4, 3, 10);
+    // 斜挎书包（巨人换成超大书包）
+    const bagW = isGarg ? 12 : 7, bagH = isGarg ? 18 : 11;
+    ctx.fillStyle = bag;
+    ctx.fillRect(-bw * 0.30 - bagW + 3, bodyY + 3, bagW, bagH);
+    ctx.fillStyle = C('#a8783c');
+    ctx.fillRect(-bw * 0.30 - bagW + 4, bodyY + 5, bagW - 2, 3);
+    ctx.fillStyle = dark;
+    ctx.fillRect(-bw * 0.30 - bagW + 3, bodyY + 3, 2, bagH);
+    // 书包里的书本 / 铅笔（巨人明显露出）
+    if (isGarg) {
+      ctx.fillStyle = C('#e8e0c8'); ctx.fillRect(-bw * 0.30 - bagW + 5, bodyY + 14, 10, 5);
+      ctx.fillStyle = C('#c04a3a'); ctx.fillRect(-bw * 0.30 - bagW + 8, bodyY + 19, 8, 2);
+      ctx.fillStyle = C('#f0c040'); ctx.fillRect(-bw * 0.30 - bagW + 15, bodyY + 10, 2, 7);
+    }
+    // 前伸手臂
+    ctx.fillStyle = skin;
+    const armY = bodyY + (isGarg ? 7 : 5);
+    ctx.fillRect(bw * 0.20, armY, bw * 0.28, 5);
+    ctx.fillRect(bw * 0.44, armY - 1, 5, 5);
+    // 头 + 学生帽
+    const headW = isGarg ? 20 : (isImp ? 13 : 16);
+    const headH = isGarg ? 20 : (isImp ? 14 : 16);
+    const headY = top + (isGarg ? 3 : 2) + bob;
+    ctx.fillStyle = skin;
+    ctx.fillRect(-headW / 2, headY, headW, headH);
+    ctx.fillStyle = C('#7d8a60');
+    ctx.fillRect(-headW / 2, headY + headH - 3, headW, 3);
+    // 学生帽：帽檐 + 帽身
+    ctx.fillStyle = cap;
+    ctx.fillRect(-headW / 2 - 1, headY - 3, headW + 2, 3);
+    ctx.fillRect(-headW / 2 + 2, headY - 6, headW - 4, 4);
+    // 眼睛（睡眼惺忪闭眼；其余黑豆眼）
+    if (z.sleepy && z.sleepState === 'dozing') {
+      ctx.fillStyle = dark;
+      ctx.fillRect(-6, headY + 7, 4, 1); ctx.fillRect(3, headY + 7, 4, 1);
+    } else {
+      ctx.fillStyle = dark;
+      ctx.fillRect(-5, headY + 6, 2, 3); ctx.fillRect(4, headY + 6, 2, 3);
+      ctx.fillStyle = '#f4f0d8';
+      ctx.fillRect(-5, headY + 6, 1, 1); ctx.fillRect(4, headY + 6, 1, 1);
+    }
+    // 嘴：啃食时张开，平时憨笑
+    ctx.fillStyle = C('#3a2a1a');
+    if (z.eating) ctx.fillRect(-1, headY + 11, 4, 4);
+    else ctx.fillRect(-3, headY + 12, 6, 1);
+    // 帽子 / 护甲 / 报纸 / 铁门 / 旗帜 / 老师 / 雷电 / 滑冰 / 狂奔
+    if (z.type === 'cone' && z.helmetHp > 0) {
+      ctx.fillStyle = C('#e0a817');
+      ctx.fillRect(-8, headY - 13, 16, 3); ctx.fillRect(-5, headY - 17, 10, 4); ctx.fillRect(-2, headY - 20, 4, 3);
+    } else if (z.type === 'bucket' && z.helmetHp > 0) {
+      ctx.fillStyle = C('#9aa4aa'); ctx.fillRect(-9, headY - 13, 18, 8);
+      ctx.fillStyle = C('#6f7a80'); ctx.fillRect(-9, headY - 13, 18, 2);
+    } else if (z.type === 'football' && z.helmetHp > 0) {
+      ctx.fillStyle = C('#c0392b'); ctx.fillRect(-10, headY - 8, 20, 8);
+      ctx.fillStyle = C('#f0d8b0'); ctx.fillRect(-1, headY - 7, 2, 6);
+      ctx.fillStyle = C('#e8e0c8'); ctx.fillRect(7, headY + 1, 5, 2);
+    } else if (z.type === 'newspaper' && z.paperHp > 0) {
+      ctx.fillStyle = C('#d8d2c0'); ctx.fillRect(bw * 0.15, bodyY + 2, 14, 18);
+      ctx.fillStyle = C('#5a5650');
+      for (let i = 0; i < 4; i++) ctx.fillRect(bw * 0.15 + 2, bodyY + 5 + i * 4, 10, 1);
+    } else if (z.type === 'screendoor' && z.doorHp > 0) {
+      ctx.fillStyle = C('#8a6a4a'); ctx.fillRect(bw * 0.10, top + 8, 10, bh - 14);
+      ctx.fillStyle = C('#5f4630'); ctx.fillRect(bw * 0.10, top + 8, 10, 2);
+      ctx.fillStyle = C('#d0b070'); ctx.fillRect(bw * 0.13, top + 18, 4, 3);
+    } else if (z.type === 'flag') {
+      ctx.fillStyle = C('#5a3a20'); ctx.fillRect(bw * 0.30, top - 12, 2, 30);
+      ctx.fillStyle = C('#d83a3a'); ctx.fillRect(bw * 0.30 + 2, top - 12, 14, 9);
+    } else if (z.type === 'teacher') {
+      ctx.fillStyle = C('#e8e0c8'); ctx.fillRect(-7, headY + 5, 5, 3); ctx.fillRect(2, headY + 5, 5, 3);
+      ctx.fillStyle = dark; ctx.fillRect(-2, headY + 6, 4, 1);
+      ctx.fillStyle = C('#d8d0b8'); ctx.fillRect(bw * 0.25, bodyY + 10, 10, 12);
+    } else if (z.type === 'thunderteacher') {
+      ctx.fillStyle = C('#c8c0a0'); ctx.fillRect(bw * 0.34, top - 10, 2, 34);
+      ctx.fillStyle = C('#ffe060'); ctx.fillRect(bw * 0.34 - 2, top - 14, 6, 5);
+      if (f % 2) { ctx.fillStyle = '#fff'; ctx.fillRect(bw * 0.34 - 4, top - 18, 2, 2); }
+    } else if (z.type === 'skater') {
+      ctx.fillStyle = C('#d8e8f0'); ctx.fillRect(-bw * 0.32, bottom - 1, bw * 0.64, 3);
+      ctx.fillStyle = C('#3a5a80'); ctx.fillRect(-bw * 0.26, bottom - 4, 10, 2); ctx.fillRect(bw * 0.06, bottom - 4, 10, 2);
+      ctx.fillStyle = C('#d04a4a'); ctx.fillRect(-6, bodyY - 2, 12, 3);
+    } else if (z.type === 'runner') {
+      ctx.fillStyle = C('#e8e0c8'); ctx.fillRect(-bw * 0.4, bodyY + 2, 3, 7);
+      ctx.fillStyle = C('#8fd0ff'); ctx.fillRect(-bw * 0.45, bodyY + 4, 2, 3);
+    }
+    // 撑杆：清晰可见的长杆，起跳时倾斜
+    if (isPole) {
+      // 清晰可见的像素长杆：16 个 2×2 方块沿对角线排列
+      ctx.fillStyle = C('#9a6a3a');
+      for (let i = 0; i < 16; i++) {
+        ctx.fillRect(-16 + i * 2, 20 - i * 2.4, 2, 2);
+      }
+      ctx.fillStyle = C('#d8b070');
+      ctx.fillRect(-16, 20, 3, 3);
+    }
+    // 巨人砸击：抬起的双臂 + 冲击波像素
+    if (isGarg && smashAge < 0.35) {
+      ctx.fillStyle = skin;
+      ctx.fillRect(-bw * 0.38, bodyY - 8, 8, 16);
+      ctx.fillRect(bw * 0.28, bodyY - 8, 8, 16);
+      ctx.fillStyle = 'rgba(255,230,160,0.6)';
+      ctx.fillRect(-bw / 2 - 4, bottom + 2, bw + 8, 3);
+    }
+    // 冰 / 火 / 减速状态的小像素提示
+    if (z.slowTimer > 0) {
+      ctx.fillStyle = 'rgba(120,210,255,0.8)';
+      ctx.fillRect(-bw / 2 - 4, bottom - 8, 2, 2); ctx.fillRect(bw / 2 + 2, top + 10, 2, 2);
+    }
+    if (z.burnTimer > 0) {
+      ctx.fillStyle = '#ff9a3a';
+      ctx.fillRect(-bw / 2 - 3, top + 3, 2, 4); ctx.fillRect(bw / 2 + 1, top + 8, 2, 3);
+    }
+    // 伙伴连线
+    if (z.type === 'buddy' && z.pairTone === 0 && z.partner && z.partner.hp > 0) {
+      ctx.strokeStyle = 'rgba(255,220,120,0.35)';
+      ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      const px = z.partner.x + (z.partner.windOffset || 0) - zx;
+      const py = z.partner.y - z.y;
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(px, py - 10); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    ctx.restore();
+    // 血条与名字（保持原有信息层级，像素化）
+    if (z.hp < z.maxHp) {
+      const barW = isGarg ? 38 : 26;
+      const hpY = z.y - bh / 2 - 7;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(zx - barW / 2, hpY, barW, 4);
+      const frac = clamp(z.hp / z.maxHp, 0, 1);
+      ctx.fillStyle = frac > 0.5 ? '#58c458' : (frac > 0.25 ? '#ffd23f' : '#ff5555');
+      ctx.fillRect(zx - barW / 2, hpY, barW * frac, 4);
+    }
+    if (showName && z.name) {
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.font = '9px "Microsoft YaHei",sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(z.name, zx, z.y + bh / 2 + 9);
+    }
+  },
+
+  projectiles() {
+    const R = (x, y, w, h, c) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+    for (const pr of game.projectiles) {
+      if (pr.kind === 'pea' || pr.kind === 'icePea' || pr.kind === 'firePea') {
+        const c = pr.kind === 'icePea' ? '#7fd0ff' : (pr.kind === 'firePea' ? '#ff8c3a' : '#7ecb3f');
+        const d = pr.kind === 'icePea' ? '#4aa7e8' : (pr.kind === 'firePea' ? '#d85f1a' : '#4c8f2c');
+        R(pr.x - 4, pr.y - 4, 8, 8, c); R(pr.x - 4, pr.y - 4, 3, 3, d);
+        if (pr.kind === 'firePea') R(pr.x + 4, pr.y - 2, 3, 3, '#ffd06a');
+        if (pr.kind === 'icePea') R(pr.x - 6, pr.y - 5, 2, 2, '#e6fbff');
+      } else {
+        const c = pr.kind === 'iceMelon' ? '#6fc6f0' : (pr.kind === 'fireMelon' ? '#ff8a3a' : '#3fae46');
+        const d = pr.kind === 'iceMelon' ? '#dff1ff' : (pr.kind === 'fireMelon' ? '#ffe0b0' : '#dff3c8');
+        R(pr.x - 7, pr.y - 7, 14, 14, c); R(pr.x - 7, pr.y - 7, 14, 2, d);
+        R(pr.x - 7, pr.y - 3, 3, 3, d); R(pr.x + 4, pr.y + 2, 3, 3, d);
+      }
+    }
+  },
+
+  effects() {
+    // 旧粒子系统用像素块重绘；数量已由 addParticle 限制
+    for (const pa of game.particles) {
+      const f = clamp(pa.age / durationOf(pa.kind), 0, 1);
+      ctx.globalAlpha = 1 - f;
+      if (pa.kind === 'explode') {
+        ctx.fillStyle = '#ffb02e';
+        const r = 6 + f * 24;
+        ctx.fillRect(pa.x - r, pa.y - 3, r * 2, 6);
+        ctx.fillRect(pa.x - 3, pa.y - r, 6, r * 2);
+        ctx.fillStyle = '#ff6a00';
+        ctx.fillRect(pa.x - r - 4, pa.y - 1, 4, 2); ctx.fillRect(pa.x + r, pa.y - 1, 4, 2);
+      } else if (pa.kind === 'melonSplash') {
+        ctx.fillStyle = '#bfe8c8';
+        for (let i = 0; i < 8; i++) {
+          const a = i / 8 * TAU, d = f * 30;
+          ctx.fillRect(pa.x + Math.cos(a) * d - 2, pa.y + Math.sin(a) * d - 2, 4, 4);
+        }
+      } else if (pa.kind === 'swallow') {
+        ctx.fillStyle = '#e6484d';
+        const s = 14 - f * 8; ctx.fillRect(pa.x - s / 2, pa.y - s / 2, s, s);
+      } else if (pa.kind === 'zombieDie') {
+        ctx.fillStyle = '#8aa06a';
+        ctx.fillRect(pa.x - 6 + f * 2, pa.y - 6, 12 - f * 6, 12 - f * 8);
+      } else if (pa.kind === 'sunPop') {
+        ctx.fillStyle = '#ffd23f'; ctx.font = 'bold 12px "Microsoft YaHei",sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('+' + SUN_VALUE, pa.x, pa.y - f * 22);
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fillRect(pa.x - 3, pa.y - 3, 6, 6);
+      }
+      ctx.globalAlpha = 1;
+    }
+    // 进阶成功：一圈像素星光
+    this.stars = this.stars.filter(s => game.time - s.t < 0.7);
+    for (const s of this.stars) {
+      const f = (game.time - s.t) / 0.7;
+      ctx.globalAlpha = 1 - f;
+      ctx.fillStyle = '#ffe680';
+      for (let i = 0; i < 8; i++) {
+        const a = i / 8 * TAU, d = 8 + f * 22;
+        ctx.fillRect(s.x + Math.cos(a) * d - 2, s.y + Math.sin(a) * d - 2, 4, 4);
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(s.x - 2, s.y - 2, 4, 4);
+      ctx.globalAlpha = 1;
+    }
+    // 死亡：倒地 + 书包飞出去（纯视觉）
+    this.deaths = this.deaths.filter(d => game.time - d.t < 0.75);
+    for (const d of this.deaths) {
+      const f = (game.time - d.t) / 0.75;
+      const big = d.type === 'gargantuar';
+      const s = big ? 1 : 0.7;
+      ctx.save();
+      ctx.translate(d.x, d.y + f * 10);
+      ctx.rotate(f * 0.7);
+      ctx.globalAlpha = 1 - f;
+      ctx.fillStyle = d.color || '#9aa97b';
+      ctx.fillRect(-12 * s, -20 * s, 24 * s, 32 * s);
+      ctx.fillStyle = '#4f6a86';
+      ctx.fillRect(-10 * s, -10 * s, 20 * s, 18 * s);
+      ctx.fillStyle = '#b84a3a';
+      ctx.fillRect(-10 * s, -24 * s, 20 * s, 4 * s);
+      ctx.fillStyle = '#8a5a32';
+      ctx.fillRect(-18 * s - f * 20, -12 * s - f * 16, 9 * s, 12 * s);
+      ctx.fillStyle = '#2c343a';
+      ctx.fillRect(-4 * s, -6 * s, 2 * s, 2 * s); ctx.fillRect(4 * s, -6 * s, 2 * s, 2 * s);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  weatherOverlay(w) {
+    if (!w) return;
+    const top = GRID_TOP, bottom = H - BAR_H;
+    const f = Math.floor(game.time * 10);
+    if (w.type === 'snow') {
+      ctx.fillStyle = 'rgba(240,252,255,0.7)';
+      for (let i = 0; i < 28; i++) {
+        const x = (i * 67 + game.time * (16 + (i % 4) * 5)) % W;
+        const y = top + ((i * 41 + game.time * (28 + (i % 5) * 4)) % (bottom - top));
+        ctx.fillRect(x, y, 3, 3);
+      }
+    } else if (w.type === 'sand') {
+      ctx.fillStyle = 'rgba(245,210,120,' + (0.15 + w.intensity * 0.25).toFixed(2) + ')';
+      for (let i = 0; i < 24; i++) {
+        const x = (i * 83 + game.time * (55 + i * 2)) % W;
+        const y = top + ((i * 47 + game.time * 22) % (bottom - top));
+        ctx.fillRect(x, y, 2, 8);
+      }
+    } else if (w.type === 'wind') {
+      ctx.fillStyle = 'rgba(200,255,225,0.22)';
+      for (let i = 0; i < 16; i++) {
+        const x = (i * 89 + game.time * 150) % (W + 100) - 50;
+        const y = top + ((i * 37 + game.time * 45) % (bottom - top));
+        ctx.fillRect(x, y, 22, 2);
+      }
+    } else if (w.type === 'thunder') {
+      if (f % 14 === 0) {
+        ctx.fillStyle = 'rgba(230,225,255,0.10)';
+        ctx.fillRect(0, top, W, bottom - top);
+      }
+    }
+  },
+
+  // 雨滴进阶成功：星光 + 短暂高亮
+  rainSuccess(p) {
+    if (!p) return;
+    this.stars.push({ x: p.x, y: p.y - 18, t: game.time });
+    p.pixelUpgradeAt = game.time;
+    if (this.stars.length > 24) this.stars.shift();
+  },
+  // 雨滴进阶失败：目标植物轻微抖动（不弹窗）
+  shakePlant(p) { if (p) p.pixelShakeUntil = game.time + 0.28; },
+  // 死亡视觉：倒地 + 书包飞出
+  spawnDeath(z) {
+    if (!z) return;
+    if (this.deaths.length > 18) this.deaths.shift();
+    this.deaths.push({ x: z.x, y: z.y, type: z.type, color: z.color, t: game.time });
+  }
+};
+
+
+/* ============================ SoundManager：8-bit 音频 / BGM / 天气环境音 ============================
+ * 说明：本项目不依赖任何外部音频文件，也不使用网络链接。
+ * 所有 Chiptune 音色、BGM 与天气环境音都由 WebAudio 振荡器/噪声实时合成，
+ * 因此离线打开即可使用，效果等同于“资源内嵌”；没有 base64 音频是因为无需携带外部文件。
+ * 该模块只做听觉反馈，不改变任何战斗数值或判定。 */
+const SoundManager = {
+  ac: null, master: null, volume: 0.8,
+  bgmMode: '', bgmTimer: null, bgmStep: 0,
+  ambient: null, ambientType: '', noiseBuf: null,
+  last: {}, lastFoot: 0,
+
+  init() {
+    if (this.ac) {
+      if (this.ac.state === 'suspended' && this.ac.resume) this.ac.resume();
+      return;
+    }
+    Sfx.init();                       // 复用已有 AudioContext，避免多套音频设备冲突
+    this.ac = Sfx.ac;
+    this.master = Sfx.master;
+    if (!this.ac) return;
+    this.setVolume(this.volume);
+    this.makeNoise();
+    this.tick();
+  },
+  setVolume(v) {
+    this.volume = clamp(v, 0, 1);
+    if (this.master) this.master.gain.value = 0.26 * this.volume;
+  },
+  setEnabled(on) {
+    this.enabled = !!on;
+    if (!on) {
+      this.stopBgm(); this.stopAmbient();
+      if (this.master) this.master.gain.value = 0;
+    } else {
+      this.init();
+      if (this.master) this.master.gain.value = 0.26 * this.volume;
+      this.tick();
+    }
+  },
+  ok(key, throttle) {
+    if (!this.ac || !game.sound) return false;
+    const t = this.ac.currentTime;
+    if (throttle && (this.last[key] || 0) > t - throttle) return false;
+    this.last[key] = t;
+    return true;
+  },
+  play(name) {
+    if (!this.ac) this.init();
+    if (!this.ac || !game.sound) return false;
+    const T = (f, d, type, v, slide) => Sfx.tone(f, d, type || 'square', v == null ? 0.06 : v, slide || 1);
+    const B = (d, v, cut) => Sfx.burst(d, v == null ? 0.10 : v, cut || 900);
+    switch (name) {
+      case 'ui': if (this.ok('ui', 0.03)) { T(740, 0.045, 'square', 0.07, 1.25); T(980, 0.035, 'square', 0.04, 1.1); } break;
+      case 'plant': if (this.ok('plant', 0.03)) { T(160, 0.08, 'triangle', 0.15, 1.9); B(0.05, 0.08, 700); } break;
+      case 'sun': if (this.ok('sun', 0.03)) { T(880, 0.06, 'sine', 0.10, 1.3); T(1320, 0.08, 'triangle', 0.06, 1.1); } break;
+      case 'shoot': if (this.ok('shoot', 0.08)) T(520, 0.045, 'square', 0.05, 0.65); break;
+      case 'shootIce': if (this.ok('shootIce', 0.08)) { T(1040, 0.06, 'square', 0.04, 0.55); B(0.03, 0.03, 2600); } break;
+      case 'shootFire': if (this.ok('shootFire', 0.08)) { T(260, 0.07, 'sawtooth', 0.05, 1.8); B(0.06, 0.05, 500); } break;
+      case 'hit': if (this.ok('hit', 0.04)) B(0.035, 0.06, 1100); break;
+      case 'hitIce': if (this.ok('hitIce', 0.05)) { T(1400, 0.04, 'sine', 0.04, 0.8); B(0.02, 0.03, 3000); } break;
+      case 'hitFire': if (this.ok('hitFire', 0.05)) { T(180, 0.06, 'sawtooth', 0.05, 1.6); B(0.04, 0.04, 600); } break;
+      case 'eat': if (this.ok('eat', 0.28)) B(0.08, 0.10, 500); break;
+      case 'die': if (this.ok('die', 0.06)) { T(180, 0.18, 'sawtooth', 0.10, 0.35); B(0.10, 0.06, 600); } break;
+      case 'boom': if (this.ok('boom', 0.05)) { B(0.35, 0.30, 700); T(90, 0.30, 'sawtooth', 0.18, 0.4); } break;
+      case 'wave': if (this.ok('wave', 0.50)) { T(140, 0.33, 'sawtooth', 0.12, 1.5); B(0.10, 0.12, 400); } break;
+      case 'poleJump': if (this.ok('poleJump', 0.15)) { T(500, 0.16, 'sine', 0.08, 2.2); B(0.06, 0.04, 1800); } break;
+      case 'upgradeSuccess': if (this.ok('upgradeSuccess', 0.1)) {
+        [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => { if (this.ac && game.sound) Sfx.tone(f, 0.11, 'square', 0.08, 1.05); }, i * 70));
+      } break;
+      case 'upgradeFail': if (this.ok('upgradeFail', 0.12)) { T(150, 0.16, 'square', 0.07, 0.7); B(0.06, 0.04, 400); } break;
+      case 'rainSlide': if (this.ok('rainSlide', 0.15)) T(300, 0.09, 'sine', 0.035, 1.25); break;
+      case 'weatherThunder': if (this.ok('weatherThunder', 0.5)) { B(0.55, 0.24, 450); T(70, 0.5, 'sawtooth', 0.14, 0.45); } break;
+      case 'weatherWind': if (this.ok('weatherWind', 0.5)) { T(220, 0.6, 'sine', 0.10, 1.8); B(0.25, 0.06, 1600); } break;
+      case 'weatherSnow': if (this.ok('weatherSnow', 0.5)) { T(1500, 0.18, 'sine', 0.04, 0.8); T(2100, 0.12, 'sine', 0.025, 0.9); } break;
+      case 'weatherSand': if (this.ok('weatherSand', 0.5)) { T(120, 0.45, 'sawtooth', 0.08, 1.4); B(0.3, 0.07, 900); } break;
+      case 'win': if (this.ok('win', 0.5)) {
+        [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => { if (this.ac && game.sound) Sfx.tone(f, 0.16, 'square', 0.09, 1.03); }, i * 90));
+      } break;
+      case 'lose': if (this.ok('lose', 0.5)) {
+        [392, 330, 262, 196].forEach((f, i) => setTimeout(() => { if (this.ac && game.sound) Sfx.tone(f, 0.22, 'triangle', 0.09, 0.85); }, i * 110));
+      } break;
+      default: return false;         // 未映射的交回旧 Sfx
+    }
+    return true;
+  },
+  // 噪声缓存：用于雨、风、雪、沙与鼓点，完全离线生成
+  makeNoise() {
+    if (this.noiseBuf || !this.ac) return;
+    const n = Math.floor(this.ac.sampleRate * 2);
+    this.noiseBuf = this.ac.createBuffer(1, n, this.ac.sampleRate);
+    const d = this.noiseBuf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+  },
+  // 场景 BGM：菜单轻快诙谐 / 战斗节奏稍快，波次越高鼓点越密
+  scene() {
+    if (game.started && !game.result && !game.failVideo && !game.over && !game.paused) return 'battle';
+    if (game.started && game.paused) return 'menu';
+    if (game.screen === 'home' || game.screen === 'mode' || game.screen === 'diff' ||
+        game.screen === 'level' || game.screen === 'pick' || game.screen === 'chaos' ||
+        game.screen === 'shop' || game.screen === 'codex' || game.screen === 'items' ||
+        game.screen === 'intro' || !game.started) return 'menu';
+    return '';
+  },
+  setScene(s) {
+    if (this.bgmMode === s) return;
+    this.stopBgm();
+    this.bgmMode = s;
+    if (!s) return;
+    this.bgmStep = 0;
+    this.bgmTimer = setInterval(() => this.bgmTick(), s === 'battle' ? 190 : 280);
+  },
+  stopBgm() {
+    if (this.bgmTimer) clearInterval(this.bgmTimer);
+    this.bgmTimer = null;
+    this.bgmMode = '';
+  },
+  bgmTick() {
+    if (!this.ac || !game.sound || !this.bgmMode) return;
+    const menu = [261.6, 329.6, 392.0, 523.3, 392.0, 329.6, 293.7, 261.6];
+    const battle = [196.0, 246.9, 293.7, 392.0, 220.0, 261.6, 329.6, 392.0];
+    const notes = this.bgmMode === 'battle' ? battle : menu;
+    const i = this.bgmStep++ % notes.length;
+    const vol = this.bgmMode === 'battle' ? 0.016 : 0.013;
+    Sfx.tone(notes[i], 0.10, this.bgmMode === 'battle' ? 'square' : 'triangle', vol, 1);
+    if (this.bgmMode === 'battle' && (i % 4 === 0 || (game.wave >= 5 && i % 2 === 0))) {
+      Sfx.burst(0.035, 0.018, 420);
+    }
+  },
+  // 天气环境音：切换天气时停止上一轨，再循环播放当前天气
+  setAmbient(type) {
+    if (this.ambientType === (type || '')) return;
+    this.stopAmbient();
+    this.ambientType = type || '';
+    if (!type || !this.ac || !game.sound) return;
+    this.makeNoise();
+    const src = this.ac.createBufferSource();
+    src.buffer = this.noiseBuf; src.loop = true;
+    const filt = this.ac.createBiquadFilter();
+    const gain = this.ac.createGain();
+    if (type === 'thunder') { filt.type = 'lowpass'; filt.frequency.value = 700; gain.gain.value = 0.035; }
+    else if (type === 'wind') { filt.type = 'bandpass'; filt.frequency.value = 520; filt.Q.value = 0.7; gain.gain.value = 0.045; }
+    else if (type === 'snow') { filt.type = 'highpass'; filt.frequency.value = 1300; gain.gain.value = 0.020; }
+    else { filt.type = 'bandpass'; filt.frequency.value = 850; filt.Q.value = 0.5; gain.gain.value = 0.035; }
+    src.connect(filt); filt.connect(gain); gain.connect(this.master);
+    src.start();
+    this.ambient = { src, filt, gain, timer: null };
+    if (type === 'thunder') {
+      this.ambient.timer = setInterval(() => {
+        if (this.ac && game.sound && this.ambientType === 'thunder') {
+          Sfx.tone(65, 0.8, 'sawtooth', 0.05, 0.55);
+        }
+      }, 4600);
+    }
+  },
+  stopAmbient() {
+    if (this.ambient) {
+      if (this.ambient.timer) clearInterval(this.ambient.timer);
+      try { this.ambient.src.stop(); } catch (e) {}
+      try { this.ambient.gain.disconnect(); } catch (e) {}
+      this.ambient = null;
+    }
+    this.ambientType = '';
+  },
+  weatherStart(type) {
+    if (!this.ac) this.init();
+    if (!game.sound) return;
+    this.play('weather' + type.charAt(0).toUpperCase() + type.slice(1)); // weatherThunder / Wind / Snow / Sand
+    this.setAmbient(type);
+  },
+  // 行走/啃咬的脚步声只是音频节流，与僵尸移动速度无关
+  footstep(z) {
+    if (!this.ac || !game.sound || !game.started || game.paused || game.result || game.failVideo) return;
+    if (z.eating || z.hp <= 0) return;
+    const now = game.time;
+    const gap = z.garg ? 0.62 : (z.type === 'imp' ? 0.22 : 0.36);
+    if (now - this.lastFoot < gap) return;
+    this.lastFoot = now;
+    if (z.garg) { Sfx.tone(55, 0.12, 'sine', 0.12, 0.7); Sfx.burst(0.05, 0.03, 300); }
+    else Sfx.tone(z.type === 'pole' ? 150 : 110, 0.045, 'square', 0.022, 0.8);
+  },
+  tick() {
+    if (!this.ac) return;
+    if (!game.sound) { this.stopBgm(); this.stopAmbient(); return; }
+    this.setScene(this.scene());
+    const wt = game.mode === 'weather' && game.started && game.weather &&
+      !game.paused && !game.result && !game.failVideo && !game.over && !game.screen ? game.weather.type : '';
+    this.setAmbient(wt);
+  }
+};
+
+// 首次用户手势创建音频上下文（浏览器自动播放策略），随后每 300ms 检查场景/天气
+window.addEventListener('pointerdown', () => SoundManager.init(), { once: true });
+window.addEventListener('keydown', () => SoundManager.init(), { once: true });
+setInterval(() => SoundManager.tick(), 300);
+
 let last = performance.now();
 function frame(now) {
   let dt = (now - last) / 1000;
